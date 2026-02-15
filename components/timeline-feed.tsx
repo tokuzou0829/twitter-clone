@@ -7,7 +7,9 @@ import {
 	createReply,
 	deletePost,
 	fetchTimeline,
+	type LinkSummary,
 	type ProfileTimelineTab,
+	refreshLinkPreview,
 	type TimelineItem,
 	toggleLike,
 	toggleRepost,
@@ -43,7 +45,14 @@ export function TimelineFeed({
 		setError(null);
 		try {
 			const nextItems = await fetchTimeline(userId, profileTab);
-			setItems(nextItems);
+			const refreshedLink = await refreshLinkPreview(
+				collectTimelineLinkIds(nextItems),
+			).catch(() => null);
+			setItems(
+				refreshedLink
+					? applyLinkSummaryToTimelineItems(nextItems, refreshedLink)
+					: nextItems,
+			);
 		} catch (loadError) {
 			if (loadError instanceof Error) {
 				setError(loadError.message);
@@ -375,3 +384,49 @@ function ComposerTargetCard({ label, post }: ComposerTargetCardProps) {
 		</div>
 	);
 }
+
+const collectTimelineLinkIds = (items: TimelineItem[]) => {
+	return [...new Set(items.flatMap((item) => collectPostLinkIds(item.post)))];
+};
+
+const collectPostLinkIds = (post: TimelineItem["post"]) => {
+	const quoteLinks = post.quotePost?.links.map((link) => link.id) ?? [];
+	return [...post.links.map((link) => link.id), ...quoteLinks];
+};
+
+const applyLinkSummaryToTimelineItems = (
+	items: TimelineItem[],
+	updatedLink: LinkSummary,
+) => {
+	return items.map((item) => ({
+		...item,
+		post: applyLinkSummaryToPost(item.post, updatedLink),
+	}));
+};
+
+const applyLinkSummaryToPost = (
+	post: TimelineItem["post"],
+	updatedLink: LinkSummary,
+) => {
+	const nextLinks = post.links.map((link) =>
+		link.id === updatedLink.id ? updatedLink : link,
+	);
+
+	if (!post.quotePost) {
+		return {
+			...post,
+			links: nextLinks,
+		};
+	}
+
+	return {
+		...post,
+		links: nextLinks,
+		quotePost: {
+			...post.quotePost,
+			links: post.quotePost.links.map((link) =>
+				link.id === updatedLink.id ? updatedLink : link,
+			),
+		},
+	};
+};

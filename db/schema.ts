@@ -160,6 +160,55 @@ export const posts = pgTable(
 	],
 );
 
+export const links = pgTable(
+	"links",
+	{
+		id: text("id").primaryKey().notNull(),
+		normalizedUrl: text("normalized_url").notNull(),
+		host: varchar("host", { length: 255 }).notNull(),
+		displayUrl: varchar("display_url", { length: 1024 }).notNull(),
+		title: text("title"),
+		description: text("description"),
+		imageUrl: text("image_url"),
+		siteName: varchar("site_name", { length: 255 }),
+		ogpFetchedAt: timestamp("ogp_fetched_at"),
+		ogpNextRefreshAt: timestamp("ogp_next_refresh_at"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		uniqueIndex("links_normalizedUrl_idx").on(table.normalizedUrl),
+		index("links_ogpNextRefreshAt_idx").on(table.ogpNextRefreshAt),
+	],
+);
+
+export const postLinks = pgTable(
+	"post_links",
+	{
+		id: text("id").primaryKey().notNull(),
+		postId: text("post_id")
+			.notNull()
+			.references(() => posts.id, { onDelete: "cascade" }),
+		linkId: text("link_id")
+			.notNull()
+			.references(() => links.id, { onDelete: "cascade" }),
+		position: integer("position").notNull(),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("post_links_postId_idx").on(table.postId),
+		index("post_links_linkId_idx").on(table.linkId),
+		uniqueIndex("post_links_postId_position_idx").on(
+			table.postId,
+			table.position,
+		),
+		uniqueIndex("post_links_postId_linkId_idx").on(table.postId, table.linkId),
+	],
+);
+
 export const postImages = pgTable(
 	"post_images",
 	{
@@ -303,8 +352,24 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
 	}),
 	quotedBy: many(posts, { relationName: "postQuotes" }),
 	images: many(postImages),
+	links: many(postLinks),
 	likes: many(postLikes),
 	reposts: many(postReposts),
+}));
+
+export const linksRelations = relations(links, ({ many }) => ({
+	postLinks: many(postLinks),
+}));
+
+export const postLinksRelations = relations(postLinks, ({ one }) => ({
+	post: one(posts, {
+		fields: [postLinks.postId],
+		references: [posts.id],
+	}),
+	link: one(links, {
+		fields: [postLinks.linkId],
+		references: [links.id],
+	}),
 }));
 
 export const postImagesRelations = relations(postImages, ({ one }) => ({

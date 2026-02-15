@@ -10,8 +10,10 @@ import {
 	createReply,
 	deletePost,
 	fetchPostDetail,
+	type LinkSummary,
 	type PostDetailResponse,
 	type PostSummary,
+	refreshLinkPreview,
 	toggleLike,
 	toggleRepost,
 } from "@/lib/social-api";
@@ -49,10 +51,11 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 			setLoadError(null);
 			try {
 				const nextDetail = await fetchPostDetail(postId);
+				const hydratedDetail = await hydrateDetailWithLinkPreview(nextDetail);
 				if (ignore || requestKey !== reloadKey) {
 					return;
 				}
-				setDetail(nextDetail);
+				setDetail(hydratedDetail);
 			} catch (loadError) {
 				if (ignore) {
 					return;
@@ -435,3 +438,64 @@ function ComposerTargetCard({ label, post }: ComposerTargetCardProps) {
 		</div>
 	);
 }
+
+const hydrateDetailWithLinkPreview = async (detail: PostDetailResponse) => {
+	const updatedLink = await refreshLinkPreview(
+		collectDetailLinkIds(detail),
+	).catch(() => null);
+
+	if (!updatedLink) {
+		return detail;
+	}
+
+	return {
+		...detail,
+		post: applyLinkSummaryToPost(detail.post, updatedLink),
+		conversationPath: detail.conversationPath.map((post) =>
+			applyLinkSummaryToPost(post, updatedLink),
+		),
+		replies: detail.replies.map((post) =>
+			applyLinkSummaryToPost(post, updatedLink),
+		),
+	};
+};
+
+const collectDetailLinkIds = (detail: PostDetailResponse) => {
+	return [
+		...new Set(
+			[...detail.conversationPath, detail.post, ...detail.replies].flatMap(
+				(post) => [
+					...post.links.map((link) => link.id),
+					...(post.quotePost?.links.map((link) => link.id) ?? []),
+				],
+			),
+		),
+	];
+};
+
+const applyLinkSummaryToPost = (
+	post: PostSummary,
+	updatedLink: LinkSummary,
+) => {
+	if (!post.quotePost) {
+		return {
+			...post,
+			links: post.links.map((link) =>
+				link.id === updatedLink.id ? updatedLink : link,
+			),
+		};
+	}
+
+	return {
+		...post,
+		links: post.links.map((link) =>
+			link.id === updatedLink.id ? updatedLink : link,
+		),
+		quotePost: {
+			...post.quotePost,
+			links: post.quotePost.links.map((link) =>
+				link.id === updatedLink.id ? updatedLink : link,
+			),
+		},
+	};
+};

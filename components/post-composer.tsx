@@ -3,6 +3,10 @@
 import { type FormEvent, useMemo, useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
+import {
+	countPostContentLength,
+	MAX_POST_CONTENT_LENGTH,
+} from "@/lib/post-content";
 import { createDisplayHandle } from "@/lib/user-handle";
 
 type PostComposerProps = {
@@ -36,8 +40,12 @@ export function PostComposer({
 			: "rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] p-3";
 	}, [variant]);
 
+	const countedLength = countPostContentLength(content);
+	const isOverLength = countedLength > MAX_POST_CONTENT_LENGTH;
 	const isSubmitDisabled =
-		isLoading || (content.trim().length === 0 && images.length === 0);
+		isLoading ||
+		isOverLength ||
+		(content.trim().length === 0 && images.length === 0);
 
 	const accountHandle = session?.user
 		? createDisplayHandle({
@@ -108,7 +116,6 @@ export function PostComposer({
 						value={content}
 						onChange={(event) => setContent(event.target.value)}
 						rows={variant === "home" ? 4 : 3}
-						maxLength={280}
 						placeholder={placeholder}
 						className={`w-full resize-none rounded-2xl border px-4 py-3 text-base text-[var(--text-main)] outline-none transition ${
 							variant === "home"
@@ -180,8 +187,12 @@ export function PostComposer({
 						</div>
 
 						<div className="flex items-center gap-2">
-							<span className="text-xs text-[var(--text-subtle)]">
-								{content.length}/280
+							<span
+								className={`text-xs ${
+									isOverLength ? "text-rose-600" : "text-[var(--text-subtle)]"
+								}`}
+							>
+								{countedLength}/{MAX_POST_CONTENT_LENGTH}
 							</span>
 							<button
 								type="submit"

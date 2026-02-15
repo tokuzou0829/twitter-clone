@@ -43,6 +43,13 @@
 			"when": 1771168802599,
 			"tag": "0005_chilly_blue_marvel",
 			"breakpoints": true
+		},
+		{
+			"idx": 6,
+			"version": "7",
+			"when": 1771171717582,
+			"tag": "0006_brave_clea",
+			"breakpoints": true
 		}
 	]
 }

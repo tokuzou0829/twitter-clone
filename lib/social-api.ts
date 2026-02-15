@@ -23,12 +23,26 @@ type PostImageSummary = {
 	position: number;
 };
 
+export type LinkSummary = {
+	id: string;
+	url: string;
+	host: string;
+	displayUrl: string;
+	title: string | null;
+	description: string | null;
+	imageUrl: string | null;
+	siteName: string | null;
+	ogpFetchedAt: string | null;
+	ogpNextRefreshAt: string | null;
+};
+
 type QuotePostSummary = {
 	id: string;
 	content: string | null;
 	createdAt: string;
 	author: UserSummary;
 	images: PostImageSummary[];
+	links: LinkSummary[];
 };
 
 export type PostSummary = {
@@ -40,6 +54,7 @@ export type PostSummary = {
 	quotePostId: string | null;
 	author: UserSummary;
 	images: PostImageSummary[];
+	links: LinkSummary[];
 	quotePost: QuotePostSummary | null;
 	stats: {
 		likes: number;
@@ -339,6 +354,35 @@ export const toggleFollow = async (
 		throw new Error(body.error ?? "Failed to update follow status");
 	}
 	return body;
+};
+
+export const refreshLinkPreview = async (
+	linkIds: string[],
+): Promise<LinkSummary | null> => {
+	const uniqueLinkIds = [...new Set(linkIds)];
+	if (uniqueLinkIds.length === 0) {
+		return null;
+	}
+
+	const response = await fetch("/api/link-previews/refresh", {
+		method: "POST",
+		credentials: "include",
+		headers: JSON_HEADERS,
+		body: JSON.stringify({
+			linkIds: uniqueLinkIds,
+		}),
+	});
+
+	const body = (await response.json()) as {
+		updated?: LinkSummary | null;
+		error?: string;
+	};
+
+	if (!response.ok) {
+		throw new Error(body.error ?? "Failed to refresh link preview");
+	}
+
+	return body.updated ?? null;
 };
 
 const postMultipart = async (path: string, formData: FormData) => {

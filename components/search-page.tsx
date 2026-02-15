@@ -13,7 +13,9 @@ import {
 	type DiscoverData,
 	deletePost,
 	fetchDiscoverData,
+	type LinkSummary,
 	type PostSummary,
+	refreshLinkPreview,
 	type SearchResponse,
 	searchPostsAndHashtags,
 	toggleLike,
@@ -150,7 +152,12 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 				if (ignore) {
 					return;
 				}
-				setSearchResults(result);
+				const hydratedResult =
+					await hydrateSearchResultsWithLinkPreview(result);
+				if (ignore) {
+					return;
+				}
+				setSearchResults(hydratedResult);
 			} catch (searchLoadError) {
 				if (ignore) {
 					return;
@@ -233,7 +240,7 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 		setSearchError(null);
 		try {
 			const nextResults = await searchPostsAndHashtags(normalizedQuery);
-			setSearchResults(nextResults);
+			setSearchResults(await hydrateSearchResultsWithLinkPreview(nextResults));
 		} catch (refreshError) {
 			if (refreshError instanceof Error) {
 				setActionError(refreshError.message);
@@ -572,6 +579,61 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 		</AppShell>
 	);
 }
+
+const hydrateSearchResultsWithLinkPreview = async (results: SearchResponse) => {
+	const updatedLink = await refreshLinkPreview(
+		collectSearchResultLinkIds(results.posts),
+	).catch(() => null);
+
+	if (!updatedLink) {
+		return results;
+	}
+
+	return {
+		...results,
+		posts: results.posts.map((post) =>
+			applyLinkSummaryToPost(post, updatedLink),
+		),
+	};
+};
+
+const collectSearchResultLinkIds = (posts: PostSummary[]) => {
+	return [
+		...new Set(
+			posts.flatMap((post) => [
+				...post.links.map((link) => link.id),
+				...(post.quotePost?.links.map((link) => link.id) ?? []),
+			]),
+		),
+	];
+};
+
+const applyLinkSummaryToPost = (
+	post: PostSummary,
+	updatedLink: LinkSummary,
+) => {
+	if (!post.quotePost) {
+		return {
+			...post,
+			links: post.links.map((link) =>
+				link.id === updatedLink.id ? updatedLink : link,
+			),
+		};
+	}
+
+	return {
+		...post,
+		links: post.links.map((link) =>
+			link.id === updatedLink.id ? updatedLink : link,
+		),
+		quotePost: {
+			...post.quotePost,
+			links: post.quotePost.links.map((link) =>
+				link.id === updatedLink.id ? updatedLink : link,
+			),
+		},
+	};
+};
 
 type ComposerTargetCardProps = {
 	label: string;

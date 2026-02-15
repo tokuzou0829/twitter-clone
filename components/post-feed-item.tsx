@@ -19,8 +19,10 @@ import {
 	useState,
 } from "react";
 
+import { extractPostLinks } from "@/lib/post-content";
 import type { PostSummary, UserSummary } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
+import { LinkPreviewCard } from "./link-preview-card";
 
 type PostFeedItemProps = {
 	post: PostSummary;
@@ -99,6 +101,7 @@ export function PostFeedItem({
 		: undefined;
 	const threadLineClassName = "bg-zinc-300";
 	const nodeDotClassName = thread?.emphasize ? "bg-sky-500" : "bg-zinc-300";
+	const primaryLink = post.links[0] ?? null;
 
 	useEffect(() => {
 		if (!isMenuOpen) {
@@ -396,6 +399,8 @@ export function PostFeedItem({
 						</p>
 					) : null}
 
+					{primaryLink ? <LinkPreviewCard link={primaryLink} /> : null}
+
 					{post.images.length > 0 ? (
 						<div className="mt-3" data-no-post-nav="true">
 							<div
@@ -691,30 +696,85 @@ function ActionButton({
 }
 
 function renderPostContent(content: string) {
+	const links = extractPostLinks(content);
+	if (links.length === 0) {
+		return renderHashtagsFromSegment(content, 0, content);
+	}
+
+	const fragments: ReactNode[] = [];
+	let cursor = 0;
+
+	for (const link of links) {
+		if (cursor < link.start) {
+			fragments.push(
+				...renderHashtagsFromSegment(
+					content.slice(cursor, link.start),
+					cursor,
+					content,
+				),
+			);
+		}
+
+		const linkText = content.slice(link.start, link.end);
+		fragments.push(
+			<a
+				key={`url-${link.position}-${link.start}`}
+				href={link.normalizedUrl}
+				target="_blank"
+				rel="noopener noreferrer"
+				onClick={(event) => {
+					event.stopPropagation();
+				}}
+				data-no-post-nav="true"
+				className="text-sky-600 hover:underline"
+			>
+				{linkText}
+			</a>,
+		);
+
+		cursor = link.end;
+	}
+
+	if (cursor < content.length) {
+		fragments.push(
+			...renderHashtagsFromSegment(content.slice(cursor), cursor, content),
+		);
+	}
+
+	return fragments.length > 0 ? fragments : content;
+}
+
+function renderHashtagsFromSegment(
+	segment: string,
+	segmentOffset: number,
+	fullContent: string,
+) {
 	const fragments: ReactNode[] = [];
 	let cursor = 0;
 	let hashtagIndex = 0;
 
-	for (const match of content.matchAll(HASHTAG_LINK_REGEX)) {
+	for (const match of segment.matchAll(HASHTAG_LINK_REGEX)) {
 		const matchedTag = match[0];
 		const startIndex = match.index;
 		if (!matchedTag || startIndex === undefined) {
 			continue;
 		}
 
-		const previousChar = startIndex === 0 ? "" : content[startIndex - 1];
-		if (startIndex !== 0 && !/\s/u.test(previousChar)) {
+		const globalStartIndex = segmentOffset + startIndex;
+		const previousChar =
+			globalStartIndex === 0 ? "" : fullContent[globalStartIndex - 1];
+		if (globalStartIndex !== 0 && !/\s/u.test(previousChar)) {
 			continue;
 		}
 
 		if (cursor < startIndex) {
-			fragments.push(content.slice(cursor, startIndex));
+			fragments.push(segment.slice(cursor, startIndex));
 		}
 
 		const normalizedTag = `#${matchedTag.slice(1).toLowerCase()}`;
 		fragments.push(
 			<Link
-				key={`hashtag-${hashtagIndex}`}
+				key={`hashtag-${segmentOffset}-${hashtagIndex}`}
 				href={`/search?q=${encodeURIComponent(normalizedTag)}`}
 				className="text-sky-600 hover:underline"
 			>
@@ -726,11 +786,11 @@ function renderPostContent(content: string) {
 		hashtagIndex += 1;
 	}
 
-	if (cursor < content.length) {
-		fragments.push(content.slice(cursor));
+	if (cursor < segment.length) {
+		fragments.push(segment.slice(cursor));
 	}
 
-	return fragments.length > 0 ? fragments : content;
+	return fragments;
 }
 
 function formatRelativeTime(value: string) {

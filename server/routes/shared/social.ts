@@ -17,12 +17,26 @@ type PostImageSummary = {
 	position: number;
 };
 
+type LinkSummary = {
+	id: string;
+	url: string;
+	host: string;
+	displayUrl: string;
+	title: string | null;
+	description: string | null;
+	imageUrl: string | null;
+	siteName: string | null;
+	ogpFetchedAt: string | null;
+	ogpNextRefreshAt: string | null;
+};
+
 type QuotePostSummary = {
 	id: string;
 	content: string | null;
 	createdAt: string;
 	author: UserSummary;
 	images: PostImageSummary[];
+	links: LinkSummary[];
 };
 
 type PostSummary = {
@@ -34,6 +48,7 @@ type PostSummary = {
 	quotePostId: string | null;
 	author: UserSummary;
 	images: PostImageSummary[];
+	links: LinkSummary[];
 	quotePost: QuotePostSummary | null;
 	stats: {
 		likes: number;
@@ -340,12 +355,14 @@ export const loadPostSummaryMap = async (params: {
 		return new Map<string, PostSummary>();
 	}
 
-	const [imagesByPostId, quoteMap, counts, viewerState] = await Promise.all([
-		loadImagesByPostId(db, publicUrl, uniquePostIds),
-		loadQuotePostMap(db, publicUrl, postRows),
-		loadCounts(db, uniquePostIds),
-		loadViewerState(db, viewerId, uniquePostIds, postRows),
-	]);
+	const [imagesByPostId, linksByPostId, quoteMap, counts, viewerState] =
+		await Promise.all([
+			loadImagesByPostId(db, publicUrl, uniquePostIds),
+			loadLinksByPostId(db, uniquePostIds),
+			loadQuotePostMap(db, publicUrl, postRows),
+			loadCounts(db, uniquePostIds),
+			loadViewerState(db, viewerId, uniquePostIds, postRows),
+		]);
 
 	const postMap = new Map<string, PostSummary>();
 
@@ -360,6 +377,7 @@ export const loadPostSummaryMap = async (params: {
 			quotePostId: postRow.quotePostId,
 			author,
 			images: imagesByPostId.get(postRow.postId) ?? [],
+			links: linksByPostId.get(postRow.postId) ?? [],
 			quotePost: postRow.quotePostId
 				? (quoteMap.get(postRow.quotePostId) ?? null)
 				: null,
@@ -397,24 +415,26 @@ const loadQuotePostMap = async (
 		return new Map<string, QuotePostSummary>();
 	}
 
-	const [quoteRows, quoteImagesByPostId] = await Promise.all([
-		db
-			.select({
-				postId: schema.posts.id,
-				content: schema.posts.content,
-				createdAt: schema.posts.createdAt,
-				authorId: schema.user.id,
-				authorName: schema.user.name,
-				authorHandle: schema.user.handle,
-				authorImage: schema.user.image,
-				authorBio: schema.user.bio,
-				authorBannerImage: schema.user.bannerImage,
-			})
-			.from(schema.posts)
-			.innerJoin(schema.user, eq(schema.posts.authorId, schema.user.id))
-			.where(inArray(schema.posts.id, quotePostIds)),
-		loadImagesByPostId(db, publicUrl, quotePostIds),
-	]);
+	const [quoteRows, quoteImagesByPostId, quoteLinksByPostId] =
+		await Promise.all([
+			db
+				.select({
+					postId: schema.posts.id,
+					content: schema.posts.content,
+					createdAt: schema.posts.createdAt,
+					authorId: schema.user.id,
+					authorName: schema.user.name,
+					authorHandle: schema.user.handle,
+					authorImage: schema.user.image,
+					authorBio: schema.user.bio,
+					authorBannerImage: schema.user.bannerImage,
+				})
+				.from(schema.posts)
+				.innerJoin(schema.user, eq(schema.posts.authorId, schema.user.id))
+				.where(inArray(schema.posts.id, quotePostIds)),
+			loadImagesByPostId(db, publicUrl, quotePostIds),
+			loadLinksByPostId(db, quotePostIds),
+		]);
 
 	const quoteMap = new Map<string, QuotePostSummary>();
 	for (const quoteRow of quoteRows) {
@@ -424,6 +444,7 @@ const loadQuotePostMap = async (
 			createdAt: quoteRow.createdAt.toISOString(),
 			author: toUserSummary(quoteRow),
 			images: quoteImagesByPostId.get(quoteRow.postId) ?? [],
+			links: quoteLinksByPostId.get(quoteRow.postId) ?? [],
 		});
 	}
 
@@ -463,6 +484,52 @@ const loadImagesByPostId = async (
 	}
 
 	return imagesByPostId;
+};
+
+const loadLinksByPostId = async (db: Database, postIds: string[]) => {
+	if (postIds.length === 0) {
+		return new Map<string, LinkSummary[]>();
+	}
+
+	const linkRows = await db
+		.select({
+			postId: schema.postLinks.postId,
+			position: schema.postLinks.position,
+			linkId: schema.links.id,
+			normalizedUrl: schema.links.normalizedUrl,
+			host: schema.links.host,
+			displayUrl: schema.links.displayUrl,
+			title: schema.links.title,
+			description: schema.links.description,
+			imageUrl: schema.links.imageUrl,
+			siteName: schema.links.siteName,
+			ogpFetchedAt: schema.links.ogpFetchedAt,
+			ogpNextRefreshAt: schema.links.ogpNextRefreshAt,
+		})
+		.from(schema.postLinks)
+		.innerJoin(schema.links, eq(schema.postLinks.linkId, schema.links.id))
+		.where(inArray(schema.postLinks.postId, postIds))
+		.orderBy(asc(schema.postLinks.position));
+
+	const linksByPostId = new Map<string, LinkSummary[]>();
+	for (const linkRow of linkRows) {
+		const list = linksByPostId.get(linkRow.postId) ?? [];
+		list.push({
+			id: linkRow.linkId,
+			url: linkRow.normalizedUrl,
+			host: linkRow.host,
+			displayUrl: linkRow.displayUrl,
+			title: linkRow.title,
+			description: linkRow.description,
+			imageUrl: linkRow.imageUrl,
+			siteName: linkRow.siteName,
+			ogpFetchedAt: linkRow.ogpFetchedAt?.toISOString() ?? null,
+			ogpNextRefreshAt: linkRow.ogpNextRefreshAt?.toISOString() ?? null,
+		});
+		linksByPostId.set(linkRow.postId, list);
+	}
+
+	return linksByPostId;
 };
 
 const loadCounts = async (db: Database, postIds: string[]) => {

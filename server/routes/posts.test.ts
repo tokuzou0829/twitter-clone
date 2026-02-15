@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
@@ -29,6 +30,71 @@ describe("/routes/posts", () => {
 		});
 
 		expect(response.status).toBe(400);
+	});
+
+	it("URLの文字数は投稿文字数に含めない", async () => {
+		await createUser();
+		const formData = new FormData();
+		formData.set(
+			"content",
+			`${"a".repeat(280)}https://example.com/really/long/url`,
+		);
+
+		const response = await app.request("/", {
+			method: "POST",
+			body: formData,
+		});
+
+		expect(response.status).toBe(201);
+	});
+
+	it("URLを除いた投稿文字数が上限超過ならエラー", async () => {
+		await createUser();
+		const formData = new FormData();
+		formData.set(
+			"content",
+			`${"a".repeat(281)}https://example.com/really/long/url`,
+		);
+
+		const response = await app.request("/", {
+			method: "POST",
+			body: formData,
+		});
+
+		expect(response.status).toBe(400);
+	});
+
+	it("投稿時にリンク情報を保存して返す", async () => {
+		await createUser();
+		const formData = new FormData();
+		formData.set("content", "hello https://example.com/path");
+
+		const response = await app.request("/", {
+			method: "POST",
+			body: formData,
+		});
+		const body = (await response.json()) as {
+			post: {
+				id: string;
+				links: Array<{ id: string; url: string; host: string }>;
+			};
+		};
+
+		const [relation] = await db
+			.select({
+				postId: schema.postLinks.postId,
+				linkId: schema.postLinks.linkId,
+			})
+			.from(schema.postLinks)
+			.where(eq(schema.postLinks.postId, body.post.id))
+			.limit(1);
+
+		expect(response.status).toBe(201);
+		expect(body.post.links.length).toBe(1);
+		expect(body.post.links[0]?.url).toBe("https://example.com/path");
+		expect(body.post.links[0]?.host).toBe("example.com");
+		expect(relation?.postId).toBe(body.post.id);
+		expect(relation?.linkId).toBe(body.post.links[0]?.id);
 	});
 
 	it("投稿画像は4枚まで", async () => {

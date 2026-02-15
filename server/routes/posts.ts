@@ -5,6 +5,12 @@ import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import * as schema from "@/db/schema";
 import type { Database } from "@/lib/db";
+import {
+	countPostContentLength,
+	extractUniquePostLinks,
+	MAX_POST_CONTENT_LENGTH,
+	type PostLink,
+} from "@/lib/post-content";
 import { ValidationError } from "@/server/errors";
 import { createFileRepository } from "@/server/infrastructure/repositories/file";
 import { getUserOrThrow } from "@/server/middleware/auth";
@@ -21,7 +27,6 @@ const postIdParamSchema = z.object({
 	postId: z.string().min(1),
 });
 
-const MAX_POST_LENGTH = 280;
 const MAX_POST_IMAGES = 4;
 const MAX_TIMELINE_REPLIES = 80;
 
@@ -114,6 +119,7 @@ const app = createHonoApp()
 			publicUrl,
 			authorId: user.id,
 			content: payload.content,
+			links: payload.links,
 			images: payload.images,
 		});
 
@@ -139,6 +145,7 @@ const app = createHonoApp()
 				publicUrl,
 				authorId: user.id,
 				content: payload.content,
+				links: payload.links,
 				images: payload.images,
 				replyToPostId: postId,
 			});
@@ -166,6 +173,7 @@ const app = createHonoApp()
 				publicUrl,
 				authorId: user.id,
 				content: payload.content,
+				links: payload.links,
 				images: payload.images,
 				quotePostId: postId,
 			});
@@ -339,11 +347,13 @@ const parsePostFormData = (
 	const content =
 		typeof contentValue === "string" ? contentValue.trim() || null : null;
 
-	if (content && content.length > MAX_POST_LENGTH) {
+	if (content && countPostContentLength(content) > MAX_POST_CONTENT_LENGTH) {
 		throw new ValidationError(
-			`Post content must be ${MAX_POST_LENGTH} characters or fewer`,
+			`Post content must be ${MAX_POST_CONTENT_LENGTH} characters or fewer`,
 		);
 	}
+
+	const links = content ? extractUniquePostLinks(content) : [];
 
 	const images = formData
 		.getAll("images")
@@ -370,6 +380,7 @@ const parsePostFormData = (
 
 	return {
 		content,
+		links,
 		images,
 	};
 };
@@ -381,6 +392,7 @@ const createPostWithImages = async (params: {
 	publicUrl: string;
 	authorId: string;
 	content: string | null;
+	links: PostLink[];
 	images: File[];
 	replyToPostId?: string;
 	quotePostId?: string;
@@ -392,6 +404,7 @@ const createPostWithImages = async (params: {
 		publicUrl,
 		authorId,
 		content,
+		links,
 		images,
 		replyToPostId,
 		quotePostId,
@@ -409,6 +422,42 @@ const createPostWithImages = async (params: {
 			createdAt: new Date(),
 			updatedAt: new Date(),
 		});
+
+		for (const link of links) {
+			const [savedLink] = await db
+				.insert(schema.links)
+				.values({
+					id: uuidv7(),
+					normalizedUrl: link.normalizedUrl,
+					host: link.host,
+					displayUrl: link.displayUrl,
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.onConflictDoUpdate({
+					target: schema.links.normalizedUrl,
+					set: {
+						host: link.host,
+						displayUrl: link.displayUrl,
+						updatedAt: new Date(),
+					},
+				})
+				.returning({
+					id: schema.links.id,
+				});
+
+			if (!savedLink) {
+				throw new Error("Failed to upsert link record");
+			}
+
+			await db.insert(schema.postLinks).values({
+				id: uuidv7(),
+				postId,
+				linkId: savedLink.id,
+				position: link.position,
+				createdAt: new Date(),
+			});
+		}
 
 		for (const [index, image] of images.entries()) {
 			const uploaded = await fileRepository.saveBlobFile(
