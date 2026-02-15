@@ -1,0 +1,21 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{ts,tsx,js,jsx,json,css,scss}"
+      run: |
+        npx biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+      fail_text: "Biomeエラーがあります。修正してください。"
+    prettier:
+      glob: "*.{md,yml}"
+      run: |
+        npx prettier -w {staged_files}
+      stage_fixed: true
+      fail_text: "Prettierエラーがあります。修正してください。"
+    eslint:
+      glob: "*.{ts,tsx,js,jsx}"
+      run: |
+        npx eslint {staged_files} --fix
+      stage_fixed: true
+      fail_text: "ESLintエラーがあります。修正してください。"
