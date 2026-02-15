@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
 	return {
 		name: "Numatter",
 		short_name: "Numatter",
-		description: "Twitter-inspired social timeline built with Next.js",
+		description: "ぬまったーはシンプルなスーパーSNSです。",
 		start_url: "/",
 		display: "standalone",
 		background_color: "#f7f9f9",

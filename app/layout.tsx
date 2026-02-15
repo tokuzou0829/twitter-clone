@@ -18,7 +18,7 @@ const bodyMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
 	title: "Numatter",
-	description: "Real-time social feed inspired by Twitter UX",
+	description: "ぬまったーはシンプルなスーパーSNSです。",
 };
 
 export const viewport: Viewport = {
