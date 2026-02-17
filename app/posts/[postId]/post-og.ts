@@ -5,6 +5,7 @@ const FALLBACK_SITE_ORIGIN = "http://localhost:3000";
 const MAX_POST_OG_IMAGES = 4;
 const MAX_TITLE_LENGTH = 60;
 const MAX_DESCRIPTION_LENGTH = 140;
+const MAX_AUTHOR_NAME_LENGTH = 32;
 const POST_OG_REVALIDATE_SECONDS = 60;
 
 type PostDetailApiResponse = {
@@ -89,6 +90,14 @@ export const fetchPostForOg = async (
 export const buildPostOgPayload = (post: PostSummary): PostOgPayload => {
 	const normalizedContent = normalizeText(post.content);
 	const imageSelection = selectPreviewImages(post);
+	const description = withAuthorByline(
+		buildDescription({
+			post,
+			content: normalizedContent,
+			imageSelection,
+		}),
+		post.author.name,
+	);
 	const handle = createDisplayHandle({
 		handle: post.author.handle,
 		name: post.author.name,
@@ -98,11 +107,7 @@ export const buildPostOgPayload = (post: PostSummary): PostOgPayload => {
 	return {
 		post,
 		title: buildTitle(post.author.name, normalizedContent),
-		description: buildDescription({
-			post,
-			content: normalizedContent,
-			imageSelection,
-		}),
+		description,
 		handle,
 		imageUrls: imageSelection.urls,
 		isQuoteImageFallback: imageSelection.isQuoteImageFallback,
@@ -142,6 +147,37 @@ const buildDescription = (params: {
 	}
 
 	return null;
+};
+
+const withAuthorByline = (
+	description: string | null,
+	authorName: string,
+): string | null => {
+	if (!description) {
+		return null;
+	}
+
+	const normalizedAuthorName = normalizeText(authorName);
+	if (!normalizedAuthorName) {
+		return description;
+	}
+
+	const authorLabel = truncateText(
+		normalizedAuthorName,
+		MAX_AUTHOR_NAME_LENGTH,
+	);
+	const suffix = ` - by ${authorLabel}`;
+	const availableLength = MAX_DESCRIPTION_LENGTH - suffix.length;
+	if (availableLength <= 0) {
+		return suffix.trimStart();
+	}
+
+	const clippedDescription =
+		description.length > availableLength
+			? truncateText(description, availableLength)
+			: description;
+
+	return `${clippedDescription}${suffix}`;
 };
 
 const selectPreviewImages = (post: PostSummary): ImageSelection => {
