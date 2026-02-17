@@ -1,5 +1,5 @@
-import { DeveloperPortalPage } from "@/components/developer-portal-page";
+import { redirect } from "next/navigation";
 
 export default function DeveloperPage() {
-	return <DeveloperPortalPage />;
+	redirect("/developer/link-preview");
 }

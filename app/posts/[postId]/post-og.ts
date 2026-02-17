@@ -18,7 +18,7 @@ type ImageSelection = {
 	isQuoteImageFallback: boolean;
 };
 
-export type PostOgPayload = {
+type PostOgPayload = {
 	post: PostSummary;
 	title: string;
 	description: string | null;
@@ -27,7 +27,7 @@ export type PostOgPayload = {
 	isQuoteImageFallback: boolean;
 };
 
-export const getSiteOrigin = (): string => {
+const getSiteOrigin = (): string => {
 	const configuredSiteUrl = process.env.BETTER_AUTH_URL;
 	if (!configuredSiteUrl) {
 		return FALLBACK_SITE_ORIGIN;

@@ -274,6 +274,32 @@ export const postReposts = pgTable(
 	],
 );
 
+export const developerApiTokens = pgTable(
+	"developer_api_tokens",
+	{
+		id: text("id").primaryKey().notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: varchar("name", { length: 64 }).notNull(),
+		tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+		tokenPrefix: varchar("token_prefix", { length: 32 }).notNull(),
+		lastUsedAt: timestamp("last_used_at"),
+		expiresAt: timestamp("expires_at"),
+		revokedAt: timestamp("revoked_at"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		index("developer_api_tokens_userId_idx").on(table.userId),
+		index("developer_api_tokens_expiresAt_idx").on(table.expiresAt),
+		uniqueIndex("developer_api_tokens_tokenHash_idx").on(table.tokenHash),
+	],
+);
+
 export const follows = pgTable(
 	"follows",
 	{
@@ -304,6 +330,7 @@ export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
 	accounts: many(account),
 	pushSubscriptions: many(pushSubscription),
+	developerApiTokens: many(developerApiTokens),
 	posts: many(posts),
 	postLikes: many(postLikes),
 	postReposts: many(postReposts),
@@ -405,6 +432,16 @@ export const postRepostsRelations = relations(postReposts, ({ one }) => ({
 		references: [user.id],
 	}),
 }));
+
+export const developerApiTokensRelations = relations(
+	developerApiTokens,
+	({ one }) => ({
+		user: one(user, {
+			fields: [developerApiTokens.userId],
+			references: [user.id],
+		}),
+	}),
+);
 
 export const followsRelations = relations(follows, ({ one }) => ({
 	follower: one(user, {

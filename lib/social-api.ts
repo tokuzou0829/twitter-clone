@@ -113,6 +113,16 @@ export type ProfileResponse = {
 	};
 };
 
+export type DeveloperApiTokenSummary = {
+	id: string;
+	name: string;
+	tokenPrefix: string;
+	createdAt: string;
+	expiresAt: string | null;
+	lastUsedAt: string | null;
+	revokedAt: string | null;
+};
+
 type PostInteractionSummary = {
 	postId: string;
 	liked: boolean;
@@ -359,6 +369,77 @@ export const registerAsDeveloper = async (): Promise<{
 	return {
 		isDeveloper: Boolean(body.isDeveloper),
 	};
+};
+
+export const fetchDeveloperApiTokens = async (): Promise<
+	DeveloperApiTokenSummary[]
+> => {
+	const response = await fetch("/api/developer/tokens", {
+		credentials: "include",
+		cache: "no-store",
+	});
+	const body = (await response.json()) as {
+		tokens?: DeveloperApiTokenSummary[];
+		error?: string;
+	};
+
+	if (!response.ok) {
+		throw new Error(body.error ?? "Failed to fetch developer API tokens");
+	}
+
+	return body.tokens ?? [];
+};
+
+export const issueDeveloperApiToken = async (
+	name: string,
+	expiresInDays?: number | null,
+): Promise<{
+	token: DeveloperApiTokenSummary;
+	plainToken: string;
+}> => {
+	const response = await fetch("/api/developer/tokens", {
+		method: "POST",
+		credentials: "include",
+		headers: JSON_HEADERS,
+		body: JSON.stringify({
+			name,
+			...(expiresInDays === undefined ? {} : { expiresInDays }),
+		}),
+	});
+	const body = (await response.json()) as {
+		token?: DeveloperApiTokenSummary;
+		plainToken?: string;
+		error?: string;
+	};
+
+	if (!response.ok || !body.token || !body.plainToken) {
+		throw new Error(body.error ?? "Failed to create developer API token");
+	}
+
+	return {
+		token: body.token,
+		plainToken: body.plainToken,
+	};
+};
+
+export const revokeDeveloperApiToken = async (
+	tokenId: string,
+): Promise<DeveloperApiTokenSummary> => {
+	const response = await fetch(`/api/developer/tokens/${tokenId}`, {
+		method: "DELETE",
+		credentials: "include",
+		headers: JSON_HEADERS,
+	});
+	const body = (await response.json()) as {
+		token?: DeveloperApiTokenSummary;
+		error?: string;
+	};
+
+	if (!response.ok || !body.token) {
+		throw new Error(body.error ?? "Failed to revoke developer API token");
+	}
+
+	return body.token;
 };
 
 export const toggleFollow = async (

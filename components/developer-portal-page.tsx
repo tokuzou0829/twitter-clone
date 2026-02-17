@@ -1,6 +1,14 @@
 "use client";
 
-import { Bot, CircleDashed, KeyRound, Link2, Lock } from "lucide-react";
+import {
+	Bot,
+	CircleDashed,
+	FileText,
+	KeyRound,
+	Link2,
+	Lock,
+	type LucideIcon,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
@@ -11,16 +19,49 @@ import {
 	registerAsDeveloper,
 } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
+import { DeveloperApiTokenManager } from "./developer-api-token-manager";
 import { LinkPreviewCard } from "./link-preview-card";
 import { Modal } from "./modal";
 
-const DEVELOPER_TOOLS = [
+type DeveloperPortalTool = "link-preview" | "api-tokens";
+
+type DeveloperPortalPageProps = {
+	tool: DeveloperPortalTool;
+};
+
+type DeveloperTool = {
+	id: string;
+	label: string;
+	description: string;
+	icon: LucideIcon;
+	disabled: boolean;
+	href?: string;
+};
+
+const DEVELOPER_TOOLS: DeveloperTool[] = [
 	{
 		id: "link-preview",
 		label: "Link Card Preview",
 		description: "OGPの表示状態を確認します",
 		icon: Link2,
 		disabled: false,
+		href: "/developer/link-preview",
+	},
+	{
+		id: "api-tokens",
+		label: "API Tokens",
+		description: "Token発行・失効",
+		icon: KeyRound,
+		disabled: false,
+		href: "/developer/api-tokens",
+	},
+	{
+		id: "developer-docs",
+		label: "Developer API Docs",
+		description: "仕様とサンプル",
+		icon: FileText,
+		disabled: false,
+		href: "/developer/docs",
 	},
 	{
 		id: "bot-builder",
@@ -29,18 +70,14 @@ const DEVELOPER_TOOLS = [
 		icon: Bot,
 		disabled: true,
 	},
-	{
-		id: "api-tokens",
-		label: "API Tokens",
-		description: "近日対応",
-		icon: KeyRound,
-		disabled: true,
-	},
-] as const;
+];
 
-const ACTIVE_TOOL_ID = "link-preview";
+const ACTIVE_HREF_BY_TOOL: Record<DeveloperPortalTool, string> = {
+	"link-preview": "/developer/link-preview",
+	"api-tokens": "/developer/api-tokens",
+};
 
-export function DeveloperPortalPage() {
+export function DeveloperPortalPage({ tool }: DeveloperPortalPageProps) {
 	const { data: session, isPending } = authClient.useSession();
 	const [previewUrl, setPreviewUrl] = useState("");
 	const [preview, setPreview] = useState<LinkSummary | null>(null);
@@ -206,6 +243,12 @@ export function DeveloperPortalPage() {
 											>
 												プロフィール
 											</Link>
+											<Link
+												href="/developer/docs"
+												className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+											>
+												API Docs
+											</Link>
 											{!isDeveloper ? (
 												<button
 													type="button"
@@ -245,31 +288,54 @@ export function DeveloperPortalPage() {
 									Products
 								</p>
 								<nav className="mt-2 space-y-1">
-									{DEVELOPER_TOOLS.map((tool) => {
-										const Icon = tool.icon;
-										const isActive = tool.id === ACTIVE_TOOL_ID;
+									{DEVELOPER_TOOLS.map((toolItem) => {
+										const Icon = toolItem.icon;
+										const isActive = toolItem.href
+											? toolItem.href === ACTIVE_HREF_BY_TOOL[tool]
+											: false;
+										const className = `flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left text-sm ${
+											toolItem.disabled
+												? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+												: isActive
+													? "border-sky-200 bg-sky-50 text-sky-900"
+													: "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50"
+										}`;
+
+										if (toolItem.href && !toolItem.disabled) {
+											return (
+												<Link
+													key={toolItem.id}
+													href={toolItem.href}
+													aria-current={isActive ? "page" : undefined}
+													className={className}
+												>
+													<Icon className="mt-0.5 h-4 w-4 shrink-0" />
+													<span className="min-w-0">
+														<span className="block truncate font-semibold">
+															{toolItem.label}
+														</span>
+														<span className="block text-xs">
+															{toolItem.description}
+														</span>
+													</span>
+												</Link>
+											);
+										}
 
 										return (
 											<button
 												type="button"
-												key={tool.id}
-												disabled={tool.disabled}
-												aria-current={isActive ? "page" : undefined}
-												className={`flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left text-sm ${
-													tool.disabled
-														? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-														: isActive
-															? "border-sky-200 bg-sky-50 text-sky-900"
-															: "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50"
-												}`}
+												key={toolItem.id}
+												disabled
+												className={className}
 											>
 												<Icon className="mt-0.5 h-4 w-4 shrink-0" />
 												<span className="min-w-0">
 													<span className="block truncate font-semibold">
-														{tool.label}
+														{toolItem.label}
 													</span>
 													<span className="block text-xs">
-														{tool.description}
+														{toolItem.description}
 													</span>
 												</span>
 											</button>
@@ -283,7 +349,8 @@ export function DeveloperPortalPage() {
 									Notice
 								</p>
 								<ul className="mt-2 space-y-1">
-									<li>・API、BOTビルダーはまもなくリリースされます。</li>
+									<li>・API Tokenは発行直後のみ平文が表示されます。</li>
+									<li>・BOTビルダーはまもなくリリース予定です。</li>
 								</ul>
 							</section>
 						</div>
@@ -310,7 +377,7 @@ export function DeveloperPortalPage() {
 									</Link>
 								</div>
 							</section>
-						) : (
+						) : tool === "link-preview" ? (
 							<>
 								<section className="border-b border-slate-200 px-5 py-4">
 									<div className="flex flex-wrap items-center justify-between gap-3">
@@ -322,16 +389,25 @@ export function DeveloperPortalPage() {
 												URLを入力して最新OGPを確認
 											</p>
 										</div>
-										{!isDeveloper ? (
-											<button
-												type="button"
-												onClick={() => setIsOptInModalOpen(true)}
-												className="inline-flex items-center gap-1 rounded-md bg-[var(--text-main)] px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+										<div className="flex items-center gap-2">
+											<Link
+												href="/developer/docs"
+												className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
 											>
-												<Lock className="h-3.5 w-3.5" />
-												開発者として登録
-											</button>
-										) : null}
+												<FileText className="h-3.5 w-3.5" />
+												Docs
+											</Link>
+											{!isDeveloper ? (
+												<button
+													type="button"
+													onClick={() => setIsOptInModalOpen(true)}
+													className="inline-flex items-center gap-1 rounded-md bg-[var(--text-main)] px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+												>
+													<Lock className="h-3.5 w-3.5" />
+													開発者として登録
+												</button>
+											) : null}
+										</div>
 									</div>
 								</section>
 
@@ -400,6 +476,12 @@ export function DeveloperPortalPage() {
 									</div>
 								</section>
 							</>
+						) : (
+							<DeveloperApiTokenManager
+								isDeveloper={isDeveloper}
+								sessionUserId={sessionUserId}
+								onRequireDeveloper={() => setIsOptInModalOpen(true)}
+							/>
 						)}
 					</main>
 				</div>
