@@ -474,6 +474,7 @@ const getDeveloperApiUserOrThrow = async (c: {
 			userHandle: schema.user.handle,
 			userEmail: schema.user.email,
 			userIsDeveloper: schema.user.isDeveloper,
+			userIsBanned: schema.user.isBanned,
 		})
 		.from(schema.developerApiTokens)
 		.innerJoin(
@@ -485,6 +486,10 @@ const getDeveloperApiUserOrThrow = async (c: {
 
 	if (!record || !record.userIsDeveloper) {
 		throw new HTTPException(401, { message: "Invalid developer API token" });
+	}
+
+	if (record.userIsBanned) {
+		throw new HTTPException(403, { message: "Forbidden" });
 	}
 
 	if (

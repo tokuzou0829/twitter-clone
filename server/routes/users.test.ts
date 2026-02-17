@@ -30,6 +30,50 @@ describe("/routes/users", () => {
 		expect(json.user).not.toHaveProperty("email");
 	});
 
+	it("BANされたユーザーは /me を取得できない", async () => {
+		await createUser({ isBanned: true });
+
+		const response = await app.request("/me", {
+			method: "GET",
+		});
+
+		expect(response.status).toBe(403);
+	});
+
+	it("IP BANされたIPは全APIアクセスが拒否される", async () => {
+		await db.insert(schema.ipBans).values({
+			id: "ip_ban_exact",
+			network: "203.0.113.10/32",
+			reason: "test",
+		});
+
+		const response = await app.request("/public_user_id", {
+			method: "GET",
+			headers: {
+				"x-forwarded-for": "203.0.113.10",
+			},
+		});
+
+		expect(response.status).toBe(403);
+	});
+
+	it("IP BANはCIDR指定でも判定される", async () => {
+		await db.insert(schema.ipBans).values({
+			id: "ip_ban_cidr",
+			network: "198.51.100.0/24",
+			reason: "test",
+		});
+
+		const response = await app.request("/public_user_id", {
+			method: "GET",
+			headers: {
+				"x-forwarded-for": "198.51.100.42, 10.0.0.5",
+			},
+		});
+
+		expect(response.status).toBe(403);
+	});
+
 	it("他ユーザー取得時にメールアドレスは含まれない", async () => {
 		await createUser();
 		await db.insert(schema.user).values({

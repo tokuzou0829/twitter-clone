@@ -342,6 +342,27 @@ describe("/routes/developer", () => {
 		expect(revokeResponse.status).toBe(200);
 		expect(profileResponse.status).toBe(401);
 	});
+
+	it("BANされたユーザーのBearerトークンは利用できない", async () => {
+		const token = await createDeveloperApiToken();
+
+		await db
+			.update(schema.user)
+			.set({
+				isBanned: true,
+				updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+			})
+			.where(eq(schema.user.id, "test_user_id"));
+
+		const profileResponse = await app.request("/v1/profile", {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+
+		expect(profileResponse.status).toBe(403);
+	});
 });
 
 const createDeveloperApiToken = async () => {

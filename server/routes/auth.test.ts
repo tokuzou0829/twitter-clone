@@ -1,10 +1,12 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as schema from "@/db/schema";
 import { createAutoUserHandleFromUserId } from "@/lib/user-handle";
 import type { BlobFile, FileId, UploadedFile } from "@/server/objects/file";
 import { setup } from "@/tests/vitest.helper";
 import app from "./auth";
 
-const { createUser } = await setup();
+const { createUser, db } = await setup();
 const { saveBlobFile } = vi.hoisted(() => ({
 	saveBlobFile: vi.fn(),
 }));
@@ -145,6 +147,52 @@ describe("/routes/auth", () => {
 			expect(json.user.handle).toBe(
 				createAutoUserHandleFromUserId(json.user.id),
 			);
+		});
+
+		it("BAN済みユーザーはサインインできない", async () => {
+			const email = "banned-signin@example.com";
+			const password = "password1234";
+
+			const signUpResponse = await app.request("/api/auth/sign-up/email", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					origin: "http://localhost:3000",
+				},
+				body: JSON.stringify({
+					name: "Banned User",
+					email,
+					password,
+				}),
+			});
+			const signedUp = (await signUpResponse.json()) as {
+				user: {
+					id: string;
+				};
+			};
+
+			await db
+				.update(schema.user)
+				.set({
+					isBanned: true,
+					updatedAt: new Date("2026-01-01"),
+				})
+				.where(eq(schema.user.id, signedUp.user.id));
+
+			const signInResponse = await app.request("/api/auth/sign-in/email", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					origin: "http://localhost:3000",
+				},
+				body: JSON.stringify({
+					email,
+					password,
+				}),
+			});
+
+			expect(signUpResponse.status).toBe(200);
+			expect(signInResponse.status).toBe(401);
 		});
 	});
 });

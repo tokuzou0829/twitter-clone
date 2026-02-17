@@ -43,3 +43,38 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - API base: `/api/developer`
 
 For full endpoint specs and examples, see `docs/developer-api.md`.
+
+## Maintenance CLI
+
+Delete posts by content substring and/or author id:
+
+```bash
+pnpm posts:delete -- --contains "spam"
+pnpm posts:delete -- --author-id "user_123" --apply
+pnpm posts:delete -- --contains "spam" --author-id "user_123" --apply
+```
+
+- default is dry-run (no deletion)
+- add `--apply` to execute deletion
+- when `--contains` and `--author-id` are both specified, matching is `AND`
+
+Ban or unban a user:
+
+```bash
+pnpm users:ban -- --user-id "user_123"
+pnpm users:ban -- --user-id "user_123" --apply
+pnpm users:ban -- --user-id "user_123" --unban --apply
+```
+
+- default mode is `ban`
+- in `ban` mode, active sessions are deleted and developer API tokens are revoked
+
+Ban or unban an IP/CIDR:
+
+```bash
+pnpm ips:ban -- --ip "203.0.113.10"
+pnpm ips:ban -- --ip "203.0.113.0/24" --reason "abuse" --apply
+pnpm ips:ban -- --ip "203.0.113.10" --unban --apply
+```
+
+- single IP input is normalized to `/32` (IPv4) or `/128` (IPv6)

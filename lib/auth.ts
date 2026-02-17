@@ -26,6 +26,11 @@ export const auth = betterAuth({
 				required: false,
 				input: false,
 			},
+			isBanned: {
+				type: "boolean",
+				required: false,
+				input: false,
+			},
 		},
 	},
 	databaseHooks: {
@@ -62,6 +67,23 @@ export const auth = betterAuth({
 					}
 
 					createdUser.handle = candidateHandle;
+				},
+			},
+		},
+		session: {
+			create: {
+				before: async (session) => {
+					const [targetUser] = await db
+						.select({
+							isBanned: schema.user.isBanned,
+						})
+						.from(schema.user)
+						.where(eq(schema.user.id, session.userId))
+						.limit(1);
+
+					if (targetUser?.isBanned) {
+						return false;
+					}
 				},
 			},
 		},

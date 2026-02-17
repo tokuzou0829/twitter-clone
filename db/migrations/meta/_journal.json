@@ -71,6 +71,13 @@
 			"when": 1771328258991,
 			"tag": "0009_bored_lady_mastermind",
 			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "7",
+			"when": 1771349642932,
+			"tag": "0010_faithful_thaddeus_ross",
+			"breakpoints": true
 		}
 	]
 }

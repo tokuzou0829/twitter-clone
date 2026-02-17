@@ -3,6 +3,7 @@ import {
 	type AnyPgColumn,
 	bigint,
 	boolean,
+	cidr,
 	index,
 	integer,
 	pgTable,
@@ -29,6 +30,7 @@ export const user = pgTable("user", {
 	name: text("name").notNull(),
 	handle: varchar("handle", { length: 15 }).unique(),
 	isDeveloper: boolean("is_developer").default(false).notNull(),
+	isBanned: boolean("is_banned").default(false).notNull(),
 	email: text("email").notNull().unique(),
 	emailVerified: boolean("email_verified").default(false).notNull(),
 	image: text("image"),
@@ -46,6 +48,24 @@ export const user = pgTable("user", {
 		.$onUpdate(() => /* @__PURE__ */ new Date())
 		.notNull(),
 });
+
+export const ipBans = pgTable(
+	"ip_bans",
+	{
+		id: text("id").primaryKey().notNull(),
+		network: cidr("network").notNull(),
+		reason: text("reason"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		uniqueIndex("ip_bans_network_idx").on(table.network),
+		index("ip_bans_createdAt_idx").on(table.createdAt),
+	],
+);
 
 export const session = pgTable(
 	"session",
