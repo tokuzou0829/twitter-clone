@@ -10,6 +10,12 @@ const OGP_TIMEOUT_MS = 5_000;
 const OGP_HTML_MAX_LENGTH = 1_500_000;
 const MAX_REFRESH_LINK_IDS = 100;
 
+type YouTubeOEmbedResponse = {
+	title?: string;
+	thumbnail_url?: string;
+	provider_name?: string;
+};
+
 const refreshRequestSchema = z.object({
 	linkIds: z.array(z.string().min(1)).max(MAX_REFRESH_LINK_IDS),
 });
@@ -135,6 +141,65 @@ export default app;
 
 const fetchOpenGraphPreview = async (targetUrl: string) => {
 	const parsedTargetUrl = assertSupportedHttpUrl(targetUrl);
+
+	if (isYouTubeHostname(parsedTargetUrl.hostname)) {
+		const youtubePreview = await fetchYouTubeOEmbedPreview(
+			parsedTargetUrl,
+		).catch(() => null);
+		if (youtubePreview) {
+			return youtubePreview;
+		}
+	}
+
+	return fetchHtmlMetadataPreview(parsedTargetUrl);
+};
+
+const fetchYouTubeOEmbedPreview = async (targetUrl: URL) => {
+	const endpoint = new URL("https://www.youtube.com/oembed");
+	endpoint.searchParams.set("url", targetUrl.toString());
+	endpoint.searchParams.set("format", "json");
+
+	const response = await fetch(endpoint.toString(), {
+		redirect: "follow",
+		signal: AbortSignal.timeout(OGP_TIMEOUT_MS),
+		headers: {
+			Accept: "application/json",
+			"User-Agent": "NumatterBot/1.0 (+https://numatter.app)",
+		},
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to fetch YouTube oEmbed: ${response.status}`);
+	}
+
+	const contentType = (
+		response.headers.get("content-type") ?? ""
+	).toLowerCase();
+	if (!contentType.includes("application/json")) {
+		throw new Error("YouTube oEmbed source is not JSON");
+	}
+
+	const payload = (await response.json()) as YouTubeOEmbedResponse;
+	const title = normalizeMetaValue(payload.title ?? null);
+	const imageUrl = toAbsoluteHttpUrl(
+		payload.thumbnail_url ?? null,
+		targetUrl.toString(),
+	);
+	const siteName = normalizeMetaValue(payload.provider_name ?? "YouTube");
+
+	if (!title && !imageUrl) {
+		throw new Error("YouTube oEmbed payload is empty");
+	}
+
+	return {
+		title,
+		description: null,
+		imageUrl,
+		siteName,
+	};
+};
+
+const fetchHtmlMetadataPreview = async (parsedTargetUrl: URL) => {
 	const response = await fetch(parsedTargetUrl.toString(), {
 		redirect: "follow",
 		signal: AbortSignal.timeout(OGP_TIMEOUT_MS),
@@ -177,6 +242,16 @@ const fetchOpenGraphPreview = async (targetUrl: string) => {
 		imageUrl: toAbsoluteHttpUrl(image, parsedTargetUrl.toString()),
 		siteName: normalizeMetaValue(siteName),
 	};
+};
+
+const isYouTubeHostname = (hostname: string) => {
+	const normalized = hostname.toLowerCase();
+	return (
+		normalized === "youtube.com" ||
+		normalized.endsWith(".youtube.com") ||
+		normalized === "youtu.be" ||
+		normalized.endsWith(".youtu.be")
+	);
 };
 
 const extractMetadataSourceHtml = (html: string) => {
