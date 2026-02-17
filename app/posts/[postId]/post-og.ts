@@ -189,7 +189,7 @@ const toSortedImageUrls = (
 
 const toHttpUrl = (value: string): string | null => {
 	try {
-		const parsedUrl = new URL(value);
+		const parsedUrl = new URL(value, toAbsoluteUrl("/"));
 		if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
 			return null;
 		}

@@ -151,62 +151,33 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 					</div>
 				</div>
 
-				{hasImages ? (
-					<>
-						{postText ? (
-							<div
-								style={{
-									display: "flex",
-									marginTop: 16,
-									fontSize: 30,
-									lineHeight: 1.35,
-									fontWeight: 500,
-									color: "#1a2740",
-									wordBreak: "break-word",
-								}}
-							>
-								{postText}
-							</div>
-						) : null}
-						<div
-							style={{
-								display: "flex",
-								flex: 1,
-								marginTop: postText ? 16 : 0,
-							}}
-						>
-							<PostImageGrid imageUrls={payload.imageUrls} />
-						</div>
-					</>
-				) : (
+				{postText ? (
 					<div
 						style={{
 							display: "flex",
-							alignItems: "center",
-							justifyContent: "center",
-							flex: 1,
 							marginTop: 16,
-							padding: "0 20px",
+							fontSize: hasImages ? 30 : 34,
+							lineHeight: 1.35,
+							fontWeight: 500,
+							color: "#1a2740",
+							wordBreak: "break-word",
 						}}
 					>
-						{postText ? (
-							<div
-								style={{
-									display: "flex",
-									fontSize: 36,
-									lineHeight: 1.35,
-									fontWeight: 500,
-									color: "#1a2740",
-									wordBreak: "break-word",
-									textAlign: "center",
-									maxWidth: "100%",
-								}}
-							>
-								{postText}
-							</div>
-						) : null}
+						{postText}
 					</div>
-				)}
+				) : null}
+
+				{hasImages ? (
+					<div
+						style={{
+							display: "flex",
+							flex: 1,
+							marginTop: postText ? 16 : 12,
+						}}
+					>
+						<PostImageGrid imageUrls={payload.imageUrls} />
+					</div>
+				) : null}
 			</div>
 		</div>,
 		{
