@@ -36,6 +36,7 @@ type PostFeedItemProps = {
 	onRepost?: () => void;
 	onDelete?: () => Promise<void> | void;
 	canDelete?: boolean;
+	canViewLikers?: boolean;
 	showDivider?: boolean;
 	thread?: ThreadDecoration;
 };
@@ -76,6 +77,7 @@ export function PostFeedItem({
 	onRepost,
 	onDelete,
 	canDelete = false,
+	canViewLikers = false,
 	showDivider = true,
 	thread,
 }: PostFeedItemProps) {
@@ -586,7 +588,9 @@ export function PostFeedItem({
 							onClick={onLike}
 							disabled={!onLike}
 							countHref={
-								post.stats.likes > 0 ? `/posts/${post.id}/likes` : undefined
+								canViewLikers && post.stats.likes > 0
+									? `/posts/${post.id}/likes`
+									: undefined
 							}
 							icon={<Heart className="h-[18px] w-[18px]" />}
 						/>

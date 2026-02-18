@@ -263,6 +263,7 @@ export function TimelineFeed({
 					repostActor={item.type === "repost" ? item.actor : null}
 					isReplyComposerOpen={activeReplyPostId === item.post.id}
 					isQuoteComposerOpen={activeQuotePostId === item.post.id}
+					canViewLikers={sessionUserId === item.post.author.id}
 					onToggleReply={() => {
 						if (!sessionUserId) {
 							setError("Please log in to reply");

@@ -268,6 +268,7 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 						post={post}
 						isReplyComposerOpen={activeReplyPostId === post.id}
 						isQuoteComposerOpen={activeQuotePostId === post.id}
+						canViewLikers={sessionUserId === post.author.id}
 						onToggleReply={() => {
 							toggleReplyComposer(post.id);
 						}}
@@ -315,6 +316,7 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 							post={reply}
 							isReplyComposerOpen={activeReplyPostId === reply.id}
 							isQuoteComposerOpen={activeQuotePostId === reply.id}
+							canViewLikers={sessionUserId === reply.author.id}
 							onToggleReply={() => {
 								toggleReplyComposer(reply.id);
 							}}
