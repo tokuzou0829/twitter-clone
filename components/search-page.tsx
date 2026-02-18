@@ -1,6 +1,7 @@
 "use client";
 
 import { Search, Sparkles } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
@@ -34,6 +35,7 @@ const EMPTY_DISCOVER_DATA: DiscoverData = {
 const EMPTY_SEARCH_RESULTS: SearchResponse = {
 	query: "",
 	posts: [],
+	users: [],
 	hashtags: [],
 };
 
@@ -455,10 +457,58 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 				<section>
 					<div className="border-b border-[var(--border-subtle)] px-4 py-3">
 						<p className="text-sm text-[var(--text-subtle)]">
+							{searchResults.users.length} 件のユーザー /{" "}
 							{searchResults.posts.length} 件の投稿 /{" "}
 							{searchResults.hashtags.length} 件のハッシュタグ
 						</p>
 					</div>
+
+					{searchResults.users.length > 0 ? (
+						<section className="border-b border-(--border-subtle) px-4 py-4">
+							<p className="text-sm font-bold text-foreground">ユーザー</p>
+							<ul className="mt-3 space-y-1">
+								{searchResults.users.map((user) => (
+									<li key={user.id}>
+										<Link
+											href={`/users/${user.id}`}
+											className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-[var(--surface-muted)]"
+										>
+											{user.image ? (
+												<Image
+													src={user.image}
+													alt=""
+													width={40}
+													height={40}
+													className="h-10 w-10 shrink-0 rounded-full bg-[var(--surface-muted)] object-cover"
+												/>
+											) : (
+												<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface-muted)] text-lg font-bold text-[var(--text-subtle)]">
+													{(user.name ?? "?").charAt(0).toUpperCase()}
+												</div>
+											)}
+											<div className="min-w-0 flex-1">
+												<p className="truncate font-bold text-[var(--text-main)]">
+													{user.name}
+												</p>
+												<p className="truncate text-sm text-[var(--text-subtle)]">
+													{createDisplayHandle({
+														handle: user.handle,
+														name: user.name,
+														userId: user.id,
+													})}
+												</p>
+												{user.bio ? (
+													<p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-subtle)]">
+														{user.bio}
+													</p>
+												) : null}
+											</div>
+										</Link>
+									</li>
+								))}
+							</ul>
+						</section>
+					) : null}
 
 					{searchResults.hashtags.length > 0 ? (
 						<section className="border-b border-[var(--border-subtle)] px-4 py-4">

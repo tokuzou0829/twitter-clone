@@ -108,12 +108,72 @@ describe("/routes/search", () => {
 		const json = (await response.json()) as {
 			query: string;
 			posts: unknown[];
+			users: unknown[];
 			hashtags: unknown[];
 		};
 
 		expect(response.status).toBe(200);
 		expect(json.query).toBe("");
 		expect(json.posts).toEqual([]);
+		expect(json.users).toEqual([]);
 		expect(json.hashtags).toEqual([]);
+	});
+
+	it("ユーザーを名前・ハンドルで検索できる", async () => {
+		await createUser();
+		await db.insert(schema.user).values({
+			id: "user_alice",
+			name: "Alice Smith",
+			handle: "alice",
+			email: "alice@example.com",
+			emailVerified: true,
+			isBanned: false,
+			createdAt: new Date("2026-01-01"),
+			updatedAt: new Date("2026-01-01"),
+		});
+
+		const byName = await app.request("/?q=Alice", { method: "GET" });
+		const byNameJson = (await byName.json()) as {
+			query: string;
+			users: Array<{ id: string; name: string; handle: string | null }>;
+		};
+		expect(byName.status).toBe(200);
+		expect(
+			byNameJson.users.some(
+				(u) => u.id === "user_alice" && u.name === "Alice Smith",
+			),
+		).toBe(true);
+
+		const byHandle = await app.request("/?q=alice", { method: "GET" });
+		const byHandleJson = (await byHandle.json()) as {
+			users: Array<{ id: string; handle: string | null }>;
+		};
+		expect(byHandle.status).toBe(200);
+		expect(
+			byHandleJson.users.some(
+				(u) => u.id === "user_alice" && u.handle === "alice",
+			),
+		).toBe(true);
+	});
+
+	it("BAN済みユーザーは検索結果に含まれない", async () => {
+		await createUser();
+		await db.insert(schema.user).values({
+			id: "user_banned",
+			name: "Banned User",
+			handle: "banned",
+			email: "banned@example.com",
+			emailVerified: true,
+			isBanned: true,
+			createdAt: new Date("2026-01-01"),
+			updatedAt: new Date("2026-01-01"),
+		});
+
+		const response = await app.request("/?q=Banned", { method: "GET" });
+		const json = (await response.json()) as {
+			users: Array<{ id: string }>;
+		};
+		expect(response.status).toBe(200);
+		expect(json.users.some((u) => u.id === "user_banned")).toBe(false);
 	});
 });

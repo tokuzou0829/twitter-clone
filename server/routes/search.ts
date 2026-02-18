@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, ilike, isNotNull } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import * as schema from "@/db/schema";
@@ -12,6 +12,7 @@ const searchQuerySchema = z.object({
 });
 
 const SEARCH_POST_LIMIT = 30;
+const SEARCH_USER_LIMIT = 20;
 const SEARCH_HASHTAG_SAMPLE_LIMIT = 800;
 const SEARCH_HASHTAG_LIMIT = 10;
 const HASHTAG_REGEX = /(?:^|\s)#([\p{L}\p{N}_]{1,50})/gu;
@@ -28,6 +29,7 @@ const app = createHonoApp().get(
 			return c.json({
 				query: "",
 				posts: [],
+				users: [],
 				hashtags: [],
 			});
 		}
@@ -36,8 +38,9 @@ const app = createHonoApp().get(
 		const viewerId = c.get("user")?.id ?? null;
 		const publicUrl = c.get("r2").publicUrl;
 
-		const [postIds, hashtags] = await Promise.all([
+		const [postIds, users, hashtags] = await Promise.all([
 			loadPostIdsByQuery(db, query),
+			loadUsersByQuery(db, query),
 			loadHashtagMatches(db, query),
 		]);
 
@@ -55,6 +58,7 @@ const app = createHonoApp().get(
 		return c.json({
 			query,
 			posts,
+			users,
 			hashtags,
 		});
 	},
@@ -87,6 +91,51 @@ const loadPostIdsByQuery = async (db: Database, query: string) => {
 		.limit(SEARCH_POST_LIMIT);
 
 	return rows.map((row) => row.id);
+};
+
+const loadUsersByQuery = async (
+	db: Database,
+	query: string,
+): Promise<
+	Array<{
+		id: string;
+		name: string;
+		handle: string | null;
+		image: string | null;
+		bio: string | null;
+		bannerImage: string | null;
+	}>
+> => {
+	const pattern = `%${query.trim()}%`;
+	const rows = await db
+		.select({
+			id: schema.user.id,
+			name: schema.user.name,
+			handle: schema.user.handle,
+			image: schema.user.image,
+			bio: schema.user.bio,
+			bannerImage: schema.user.bannerImage,
+		})
+		.from(schema.user)
+		.where(
+			and(
+				eq(schema.user.isBanned, false),
+				or(
+					ilike(schema.user.name, pattern),
+					ilike(schema.user.handle, pattern),
+				),
+			),
+		)
+		.limit(SEARCH_USER_LIMIT);
+
+	return rows.map((row) => ({
+		id: row.id,
+		name: row.name,
+		handle: row.handle,
+		image: row.image,
+		bio: row.bio,
+		bannerImage: row.bannerImage,
+	}));
 };
 
 const loadHashtagMatches = async (

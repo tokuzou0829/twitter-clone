@@ -78,6 +78,7 @@ export type PostDetailResponse = {
 export type SearchResponse = {
 	query: string;
 	posts: PostSummary[];
+	users: UserSummary[];
 	hashtags: HashtagSummary[];
 };
 
@@ -230,6 +231,7 @@ export const searchPostsAndHashtags = async (
 	return {
 		query: body.query ?? normalizedQuery,
 		posts: body.posts ?? [],
+		users: body.users ?? [],
 		hashtags: body.hashtags ?? [],
 	};
 };
