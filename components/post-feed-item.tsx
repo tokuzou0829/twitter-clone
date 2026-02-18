@@ -36,6 +36,7 @@ type PostFeedItemProps = {
 	onRepost?: () => void;
 	onDelete?: () => Promise<void> | void;
 	canDelete?: boolean;
+	canViewLikers?: boolean;
 	showDivider?: boolean;
 	thread?: ThreadDecoration;
 };
@@ -76,6 +77,7 @@ export function PostFeedItem({
 	onRepost,
 	onDelete,
 	canDelete = false,
+	canViewLikers = false,
 	showDivider = true,
 	thread,
 }: PostFeedItemProps) {
@@ -585,6 +587,11 @@ export function PostFeedItem({
 							isActive={post.viewer.liked}
 							onClick={onLike}
 							disabled={!onLike}
+							countHref={
+								canViewLikers && post.stats.likes > 0
+									? `/posts/${post.id}/likes`
+									: undefined
+							}
 							icon={<Heart className="h-[18px] w-[18px]" />}
 						/>
 					</div>
@@ -634,6 +641,7 @@ type ActionButtonProps = {
 	onClick?: () => void;
 	disabled?: boolean;
 	isActive?: boolean;
+	countHref?: string;
 };
 
 function ActionButton({
@@ -644,6 +652,7 @@ function ActionButton({
 	onClick,
 	disabled = false,
 	isActive = false,
+	countHref,
 }: ActionButtonProps) {
 	const toneClassName =
 		tone === "reply"
@@ -678,19 +687,32 @@ function ActionButton({
 			onClick={onClick}
 			disabled={disabled}
 			aria-label={label}
-			className={`group inline-flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--text-subtle)] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+			className={`group inline-flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--text-subtle)] transition disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer ${
 				isActive ? activeClassName : ""
 			}`}
 		>
 			<span
-				className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+				className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition cursor-pointer ${
 					isActive ? activeIconClassName : toneClassName
 				}`}
 				aria-hidden="true"
 			>
 				{icon}
 			</span>
-			<span className="tabular-nums">{count}</span>
+			{typeof countHref === "string" && count > 0 ? (
+				<Link
+					href={countHref}
+					onClick={(event) => {
+						event.stopPropagation();
+					}}
+					data-no-post-nav="true"
+					className="tabular-nums rounded-full px-2 py-0.5 text-[var(--text-subtle)] hover:bg-(--surface-muted) hover:underline cursor-pointer"
+				>
+					{count}
+				</Link>
+			) : (
+				<span className="tabular-nums px-2 py-0.5">{count}</span>
+			)}
 		</button>
 	);
 }

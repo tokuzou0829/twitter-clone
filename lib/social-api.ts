@@ -482,6 +482,30 @@ export const fetchFollowers = async (
 	};
 };
 
+export const fetchPostLikers = async (
+	postId: string,
+): Promise<FollowListResponse> => {
+	const response = await fetch(`/api/posts/${postId}/likes`, {
+		credentials: "include",
+		cache: "no-store",
+	});
+	const body = (await response.json()) as FollowListResponse & {
+		error?: string;
+	};
+	if (!response.ok) {
+		if (response.status === 401) {
+			throw new Error("いいねしたユーザー一覧を表示するにはログインが必要です");
+		}
+		if (response.status === 403) {
+			throw new Error("この投稿のいいね一覧を閲覧できるのは投稿者本人のみです");
+		}
+		throw new Error(body.error ?? "Failed to fetch post likers");
+	}
+	return {
+		users: body.users ?? [],
+	};
+};
+
 export const fetchFollowing = async (
 	userId: string,
 ): Promise<FollowListResponse> => {

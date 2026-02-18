@@ -234,6 +234,55 @@ const app = createHonoApp()
 
 		return c.body(null, 204);
 	})
+	.get("/:postId/likes", zValidator("param", postIdParamSchema), async (c) => {
+		const { user } = await getUserOrThrow(c);
+		const { postId } = c.req.valid("param");
+		const db = c.get("db");
+
+		const [post] = await db
+			.select({
+				id: schema.posts.id,
+				authorId: schema.posts.authorId,
+			})
+			.from(schema.posts)
+			.where(eq(schema.posts.id, postId))
+			.limit(1);
+
+		if (!post) {
+			throw new HTTPException(404, { message: "Post not found" });
+		}
+
+		if (post.authorId !== user.id) {
+			throw new HTTPException(403, {
+				message: "Only the author can view likers",
+			});
+		}
+
+		const rows = await db
+			.select({
+				id: schema.user.id,
+				name: schema.user.name,
+				handle: schema.user.handle,
+				image: schema.user.image,
+				bio: schema.user.bio,
+				bannerImage: schema.user.bannerImage,
+			})
+			.from(schema.postLikes)
+			.innerJoin(schema.user, eq(schema.postLikes.userId, schema.user.id))
+			.where(eq(schema.postLikes.postId, postId))
+			.orderBy(desc(schema.postLikes.createdAt));
+
+		const users = rows.map((row) => ({
+			id: row.id,
+			name: row.name,
+			handle: row.handle,
+			image: row.image,
+			bio: row.bio,
+			bannerImage: row.bannerImage,
+		}));
+
+		return c.json({ users });
+	})
 	.post("/:postId/likes", zValidator("param", postIdParamSchema), async (c) => {
 		const { user } = await getUserOrThrow(c);
 		const { postId } = c.req.valid("param");
