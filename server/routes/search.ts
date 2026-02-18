@@ -18,6 +18,10 @@ const SEARCH_HASHTAG_LIMIT = 10;
 const HASHTAG_REGEX = /(?:^|\s)#([\p{L}\p{N}_]{1,50})/gu;
 const QUERY_HASHTAG_REGEX = /#([\p{L}\p{N}_]{1,50})/gu;
 
+/** Escapes \ % _ for use in SQL LIKE/ILIKE patterns (PostgreSQL default escape is backslash). */
+const escapeLike = (value: string): string =>
+	value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+
 const app = createHonoApp().get(
 	"/",
 	zValidator("query", searchQuerySchema),
@@ -106,7 +110,7 @@ const loadUsersByQuery = async (
 		bannerImage: string | null;
 	}>
 > => {
-	const pattern = `%${query.trim()}%`;
+	const pattern = `%${escapeLike(query.trim())}%`;
 	const rows = await db
 		.select({
 			id: schema.user.id,
