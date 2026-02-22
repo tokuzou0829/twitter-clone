@@ -748,7 +748,7 @@ function renderPostContent(content: string) {
 					event.stopPropagation();
 				}}
 				data-no-post-nav="true"
-				className="text-sky-600 hover:underline"
+				className="text-sky-600 hover:underline break-all"
 			>
 				{linkText}
 			</a>,
@@ -798,7 +798,7 @@ function renderHashtagsFromSegment(
 			<Link
 				key={`hashtag-${segmentOffset}-${hashtagIndex}`}
 				href={`/search?q=${encodeURIComponent(normalizedTag)}`}
-				className="text-sky-600 hover:underline"
+				className="text-sky-600 hover:underline break-all"
 			>
 				{matchedTag}
 			</Link>,
