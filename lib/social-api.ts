@@ -126,7 +126,7 @@ export type NotificationFilter =
 	| "quote"
 	| "info";
 
-export type NotificationType = Exclude<NotificationFilter, "all"> | "violation";
+type NotificationType = Exclude<NotificationFilter, "all"> | "violation";
 
 export type NotificationItem = {
 	id: string;
@@ -143,6 +143,10 @@ export type NotificationItem = {
 
 type NotificationsResponse = {
 	items: NotificationItem[];
+};
+
+type NotificationUnreadCountResponse = {
+	count: number;
 };
 
 export type DeveloperApiTokenSummary = {
@@ -211,6 +215,30 @@ export const fetchNotifications = async (
 		items: body.items ?? [],
 	};
 };
+
+export const fetchNotificationUnreadCount =
+	async (): Promise<NotificationUnreadCountResponse> => {
+		const response = await fetch("/api/notifications/unread-count", {
+			credentials: "include",
+			cache: "no-store",
+		});
+		const body = (await response.json()) as NotificationUnreadCountResponse & {
+			error?: string;
+		};
+
+		if (!response.ok) {
+			throw new Error(
+				body.error ?? "Failed to fetch notification unread count",
+			);
+		}
+
+		return {
+			count:
+				typeof body.count === "number" && Number.isFinite(body.count)
+					? body.count
+					: 0,
+		};
+	};
 
 export const fetchTimeline = async (
 	userId?: string,

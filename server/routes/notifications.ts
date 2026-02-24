@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -43,10 +43,39 @@ const MAX_NOTIFICATION_ITEMS = 60;
 const MAX_NOTIFICATION_ACTORS = 3;
 
 const app = createHonoApp()
+	.get("/unread-count", async (c) => {
+		const { user } = await getUserOrThrow(c);
+		const db = c.get("db");
+
+		const [result] = await db
+			.select({ count: count() })
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, user.id),
+					isNull(schema.notifications.readAt),
+				),
+			);
+
+		return c.json({ count: Number(result?.count ?? 0) });
+	})
 	.get("/", zValidator("query", notificationsQuerySchema), async (c) => {
 		const { user } = await getUserOrThrow(c);
 		const { type = "all" } = c.req.valid("query");
 		const db = c.get("db");
+		const isAllType = type === "all";
+
+		if (isAllType) {
+			await db
+				.update(schema.notifications)
+				.set({ readAt: new Date() })
+				.where(
+					and(
+						eq(schema.notifications.recipientUserId, user.id),
+						isNull(schema.notifications.readAt),
+					),
+				);
+		}
 
 		const rows = await db
 			.select({
@@ -72,7 +101,7 @@ const app = createHonoApp()
 				eq(schema.notifications.actorUserId, schema.user.id),
 			)
 			.where(
-				type === "all"
+				isAllType
 					? eq(schema.notifications.recipientUserId, user.id)
 					: and(
 							eq(schema.notifications.recipientUserId, user.id),

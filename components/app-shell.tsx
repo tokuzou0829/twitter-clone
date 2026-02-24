@@ -15,7 +15,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { signOut } from "@/lib/auth-actions";
 import { authClient } from "@/lib/auth-client";
-import { type DiscoverData, fetchDiscoverData } from "@/lib/social-api";
+import {
+	type DiscoverData,
+	fetchDiscoverData,
+	fetchNotificationUnreadCount,
+} from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 
 type AppShellProps = {
@@ -36,6 +40,10 @@ const EMPTY_DISCOVER_DATA: DiscoverData = {
 	suggestedUsers: [],
 };
 
+const formatNotificationBadgeCount = (count: number) => {
+	return count > 99 ? "99+" : String(count);
+};
+
 export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 	const pathname = usePathname();
 	const { data: session, isPending } = authClient.useSession();
@@ -43,6 +51,7 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 		useState<DiscoverData>(EMPTY_DISCOVER_DATA);
 	const [isDiscoverLoading, setIsDiscoverLoading] = useState(true);
 	const [discoverError, setDiscoverError] = useState<string | null>(null);
+	const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
 
 	const navItems: NavItem[] = session?.user
 		? [
@@ -143,6 +152,45 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 		};
 	}, [sessionUserId]);
 
+	useEffect(() => {
+		if (!sessionUserId) {
+			setNotificationUnreadCount(0);
+			return;
+		}
+
+		if (pathname.startsWith("/notifications")) {
+			setNotificationUnreadCount(0);
+			return;
+		}
+
+		let ignore = false;
+
+		const loadNotificationUnreadCount = async () => {
+			try {
+				const response = await fetchNotificationUnreadCount();
+				if (ignore) {
+					return;
+				}
+				setNotificationUnreadCount(response.count);
+			} catch {
+				if (!ignore) {
+					setNotificationUnreadCount(0);
+				}
+			}
+		};
+
+		void loadNotificationUnreadCount();
+
+		return () => {
+			ignore = true;
+		};
+	}, [pathname, sessionUserId]);
+
+	const notificationsBadgeCount =
+		session?.user && !pathname.startsWith("/notifications")
+			? notificationUnreadCount
+			: 0;
+
 	const mobileNavGridClassName = "grid-cols-4";
 
 	return (
@@ -186,6 +234,8 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 						<nav className="space-y-1">
 							{navItems.map((item) => {
 								const isActive = item.match(pathname);
+								const badgeCount =
+									item.href === "/notifications" ? notificationsBadgeCount : 0;
 								return (
 									<Link
 										key={item.href}
@@ -194,7 +244,14 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 											isActive ? "font-extrabold" : "font-medium"
 										}`}
 									>
-										<span className="text-[var(--text-main)]">{item.icon}</span>
+										<span className="relative inline-flex text-[var(--text-main)]">
+											{item.icon}
+											{badgeCount > 0 ? (
+												<span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-rose-500 px-1.5 text-center text-[10px] leading-4 font-bold text-white">
+													{formatNotificationBadgeCount(badgeCount)}
+												</span>
+											) : null}
+										</span>
 										<span>{item.label}</span>
 									</Link>
 								);
@@ -287,6 +344,8 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 				>
 					{navItems.map((item) => {
 						const isActive = item.match(pathname);
+						const badgeCount =
+							item.href === "/notifications" ? notificationsBadgeCount : 0;
 						return (
 							<Link
 								key={item.href}
@@ -297,7 +356,14 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 										: "font-medium text-[var(--text-subtle)]"
 								}`}
 							>
-								<span>{item.icon}</span>
+								<span className="relative inline-flex">
+									{item.icon}
+									{badgeCount > 0 ? (
+										<span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[10px] leading-4 font-bold text-white">
+											{formatNotificationBadgeCount(badgeCount)}
+										</span>
+									) : null}
+								</span>
 								<span>{item.label}</span>
 							</Link>
 						);

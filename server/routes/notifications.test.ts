@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
@@ -13,6 +13,108 @@ describe("/routes/notifications", () => {
 		});
 
 		expect(response.status).toBe(401);
+	});
+
+	it("未ログイン時は未読件数を取得できない", async () => {
+		const response = await app.request("/unread-count", {
+			method: "GET",
+		});
+
+		expect(response.status).toBe(401);
+	});
+
+	it("未読件数を取得できる", async () => {
+		const recipient = await createUser();
+		const otherUserId = "notifications_unread_other_user";
+
+		await db.insert(schema.user).values({
+			id: otherUserId,
+			name: "Other",
+			email: "notifications-unread-other@example.com",
+		});
+
+		await db.insert(schema.notifications).values([
+			{
+				id: "notifications_unread_a",
+				recipientUserId: recipient.id,
+				type: "info",
+				sourceType: "system_manual",
+				sourceId: "notifications_unread_source_a",
+				title: "Unread",
+				body: "Unread notification",
+			},
+			{
+				id: "notifications_unread_b",
+				recipientUserId: recipient.id,
+				type: "info",
+				sourceType: "system_manual",
+				sourceId: "notifications_unread_source_b",
+				title: "Read",
+				body: "Read notification",
+				readAt: new Date("2026-01-03T00:00:00.000Z"),
+			},
+			{
+				id: "notifications_unread_c",
+				recipientUserId: otherUserId,
+				type: "info",
+				sourceType: "system_manual",
+				sourceId: "notifications_unread_source_c",
+				title: "Other",
+				body: "Other user unread",
+			},
+		]);
+
+		const response = await app.request("/unread-count", {
+			method: "GET",
+		});
+		const body = (await response.json()) as {
+			count: number;
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.count).toBe(1);
+	});
+
+	it("all通知取得時に未読通知を既読化する", async () => {
+		const recipient = await createUser();
+
+		await db.insert(schema.notifications).values([
+			{
+				id: "notifications_mark_read_a",
+				recipientUserId: recipient.id,
+				type: "info",
+				sourceType: "system_manual",
+				sourceId: "notifications_mark_read_source_a",
+				title: "A",
+				body: "A",
+			},
+			{
+				id: "notifications_mark_read_b",
+				recipientUserId: recipient.id,
+				type: "violation",
+				sourceType: "system_manual",
+				sourceId: "notifications_mark_read_source_b",
+				title: "B",
+				body: "B",
+			},
+		]);
+
+		const response = await app.request("/", {
+			method: "GET",
+		});
+
+		const [remainingUnread] = await db
+			.select({ count: count() })
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, recipient.id),
+					isNull(schema.notifications.readAt),
+				),
+			);
+
+		expect(response.status).toBe(200);
+		expect(Number(remainingUnread?.count ?? 0)).toBe(0);
 	});
 
 	it("いいね通知は投稿ごとにスタックされる", async () => {
