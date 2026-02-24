@@ -8,6 +8,7 @@ export const NOTIFICATION_FILTER_VALUES = [
 	"follow",
 	"like",
 	"repost",
+	"reply",
 	"quote",
 	"info",
 ] as const;
@@ -274,9 +275,15 @@ const resolveActionUrl = (stack: NotificationStack) => {
 const isSupportedNotificationType = (
 	value: string,
 ): value is NotificationType => {
-	return ["follow", "like", "repost", "quote", "info", "violation"].includes(
-		value,
-	);
+	return [
+		"follow",
+		"like",
+		"repost",
+		"reply",
+		"quote",
+		"info",
+		"violation",
+	].includes(value);
 };
 
 const createNotificationStackKey = (
@@ -288,7 +295,13 @@ const createNotificationStackKey = (
 		return "follow";
 	}
 
-	if ((type === "like" || type === "repost" || type === "quote") && postId) {
+	if (
+		(type === "like" ||
+			type === "repost" ||
+			type === "reply" ||
+			type === "quote") &&
+		postId
+	) {
 		return `${type}:${postId}`;
 	}
 

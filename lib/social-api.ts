@@ -123,6 +123,7 @@ export type NotificationFilter =
 	| "follow"
 	| "like"
 	| "repost"
+	| "reply"
 	| "quote"
 	| "info";
 

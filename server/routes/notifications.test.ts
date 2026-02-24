@@ -249,6 +249,47 @@ describe("/routes/notifications", () => {
 		expect(body.items[0]?.type).toBe("follow");
 	});
 
+	it("type=replyでリプライ通知を絞り込める", async () => {
+		const recipient = await createUser();
+		const replierId = "notifications_filter_replier";
+		const targetPostId = "notifications_filter_reply_post";
+
+		await db.insert(schema.user).values({
+			id: replierId,
+			name: "Replier",
+			email: "notifications-filter-replier@example.com",
+		});
+
+		await db.insert(schema.posts).values({
+			id: targetPostId,
+			authorId: recipient.id,
+			content: "reply target",
+		});
+
+		await db.insert(schema.notifications).values({
+			id: "notifications_filter_reply",
+			recipientUserId: recipient.id,
+			actorUserId: replierId,
+			type: "reply",
+			postId: targetPostId,
+			sourceType: "post_reply",
+			sourceId: "notifications_filter_reply_source",
+			actionUrl: `/posts/${targetPostId}`,
+		});
+
+		const response = await app.request("/?type=reply", {
+			method: "GET",
+		});
+		const body = (await response.json()) as {
+			items: Array<{ type: string; post: { id: string } | null }>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.items.length).toBe(1);
+		expect(body.items[0]?.type).toBe("reply");
+		expect(body.items[0]?.post?.id).toBe(targetPostId);
+	});
+
 	it("開発者以外はsystem通知を作成できない", async () => {
 		await createUser();
 		await db.insert(schema.user).values({

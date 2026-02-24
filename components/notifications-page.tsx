@@ -4,6 +4,7 @@ import {
 	CircleAlert,
 	Heart,
 	Info,
+	MessageCircle,
 	Quote as QuoteIcon,
 	Repeat2,
 	UserPlus,
@@ -25,6 +26,7 @@ const NOTIFICATION_FILTERS: Array<{ id: NotificationFilter; label: string }> = [
 	{ id: "follow", label: "フォロー" },
 	{ id: "like", label: "いいね" },
 	{ id: "repost", label: "リポスト" },
+	{ id: "reply", label: "リプライ" },
 	{ id: "quote", label: "引用" },
 	{ id: "info", label: "INFO" },
 ];
@@ -322,6 +324,13 @@ function getNotificationIcon(type: NotificationItem["type"]) {
 		};
 	}
 
+	if (type === "reply") {
+		return {
+			node: <MessageCircle className="h-7 w-7" />,
+			textClassName: "text-sky-600",
+		};
+	}
+
 	if (type === "quote") {
 		return {
 			node: <QuoteIcon className="h-7 w-7" />,
@@ -359,6 +368,10 @@ function createNotificationSummary(item: NotificationItem): ReactNode {
 
 	if (item.type === "repost") {
 		return `${actorText}があなたの投稿をリポストしました`;
+	}
+
+	if (item.type === "reply") {
+		return `${actorText}があなたの投稿にリプライしました`;
 	}
 
 	return `${actorText}があなたの投稿を引用しました`;

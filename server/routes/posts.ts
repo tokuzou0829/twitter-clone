@@ -132,15 +132,16 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			await assertPostExists(c.get("db"), postId);
+			const db = c.get("db");
+			const targetPost = await assertPostExists(db, postId);
 
 			const formData = await c.req.formData();
 			const payload = parsePostFormData(formData, { allowEmpty: false });
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-			const fileRepository = createFileRepository(client, c.get("db"), baseUrl);
+			const fileRepository = createFileRepository(client, db, baseUrl);
 			const post = await createPostWithImages({
-				db: c.get("db"),
+				db,
 				fileRepository,
 				bucketName,
 				publicUrl,
@@ -149,6 +150,16 @@ const app = createHonoApp()
 				links: payload.links,
 				images: payload.images,
 				replyToPostId: postId,
+			});
+
+			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
+				recipientUserId: targetPost.authorId,
+				actorUserId: user.id,
+				type: "reply",
+				postId,
+				sourceType: "post_reply",
+				sourceId: post.id,
+				actionUrl: `/posts/${postId}`,
 			});
 
 			return c.json({ post }, 201);
@@ -619,7 +630,7 @@ const createNotificationIfNeeded = async (
 	params: {
 		recipientUserId: string;
 		actorUserId: string;
-		type: "like" | "repost" | "quote";
+		type: "like" | "repost" | "quote" | "reply";
 		postId: string;
 		quotePostId?: string;
 		sourceType: string;

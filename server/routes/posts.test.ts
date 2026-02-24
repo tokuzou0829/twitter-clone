@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
 import app from "./posts";
@@ -201,6 +201,108 @@ describe("/routes/posts", () => {
 		expect(quoteResponse.status).toBe(201);
 		expect(quoted.post.quotePostId).toBe(created.post.id);
 		expect(quoted.post.content).toBe("my comment");
+	});
+
+	it("他ユーザー投稿にリプライするとリプライ通知が作成される", async () => {
+		const replier = await createUser();
+		const authorId = "notification_reply_author";
+		const targetPostId = "notification_reply_target_post";
+
+		await db.insert(schema.user).values({
+			id: authorId,
+			name: "Reply Target",
+			email: "notification-reply-author@example.com",
+		});
+		await db.insert(schema.posts).values({
+			id: targetPostId,
+			authorId,
+			content: "reply target",
+		});
+
+		const replyFormData = new FormData();
+		replyFormData.set("content", "my reply");
+
+		const replyResponse = await app.request(`/${targetPostId}/replies`, {
+			method: "POST",
+			body: replyFormData,
+		});
+		const replied = (await replyResponse.json()) as {
+			post: { id: string; replyToPostId: string | null };
+		};
+
+		const [savedNotification] = await db
+			.select({
+				type: schema.notifications.type,
+				postId: schema.notifications.postId,
+				sourceType: schema.notifications.sourceType,
+				sourceId: schema.notifications.sourceId,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, authorId),
+					eq(schema.notifications.actorUserId, replier.id),
+					eq(schema.notifications.type, "reply"),
+					eq(schema.notifications.postId, targetPostId),
+				),
+			)
+			.limit(1);
+
+		expect(replyResponse.status).toBe(201);
+		expect(replied.post.replyToPostId).toBe(targetPostId);
+		expect(savedNotification?.type).toBe("reply");
+		expect(savedNotification?.postId).toBe(targetPostId);
+		expect(savedNotification?.sourceType).toBe("post_reply");
+		expect(savedNotification?.sourceId).toBe(replied.post.id);
+	});
+
+	it("リプライ通知作成時に通知Webhookへ配信される", async () => {
+		await createUser();
+		const authorId = "reply_webhook_target";
+		const targetPostId = "reply_webhook_target_post";
+
+		await db.insert(schema.user).values({
+			id: authorId,
+			name: "Reply Webhook Target",
+			email: "reply-webhook-target@example.com",
+		});
+		await db.insert(schema.posts).values({
+			id: targetPostId,
+			authorId,
+			content: "reply webhook target",
+		});
+		await db.insert(schema.developerNotificationWebhooks).values({
+			id: "reply_webhook_id",
+			userId: authorId,
+			name: "Reply Hook",
+			endpoint: "https://hooks.example.com/reply",
+			secret: "reply-webhook-secret",
+			isActive: true,
+		});
+
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 200 }));
+
+		const replyFormData = new FormData();
+		replyFormData.set("content", "webhook reply");
+		const response = await app.request(`/${targetPostId}/replies`, {
+			method: "POST",
+			body: replyFormData,
+		});
+
+		const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+		const payload = JSON.parse(String(requestInit?.body ?? "{}")) as {
+			event: string;
+			trigger: { type: string } | null;
+		};
+
+		expect(response.status).toBe(201);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(payload.event).toBe("notifications.snapshot");
+		expect(payload.trigger?.type).toBe("reply");
+
+		fetchSpy.mockRestore();
 	});
 
 	it("他ユーザーへのいいね通知は作成され解除で削除される", async () => {
