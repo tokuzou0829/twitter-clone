@@ -342,6 +342,51 @@ export const follows = pgTable(
 	],
 );
 
+export const notifications = pgTable(
+	"notifications",
+	{
+		id: text("id").primaryKey().notNull(),
+		recipientUserId: text("recipient_user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		actorUserId: text("actor_user_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		type: varchar("type", { length: 32 }).notNull(),
+		postId: text("post_id").references(() => posts.id, {
+			onDelete: "cascade",
+		}),
+		quotePostId: text("quote_post_id").references(() => posts.id, {
+			onDelete: "cascade",
+		}),
+		sourceType: varchar("source_type", { length: 32 }).notNull(),
+		sourceId: text("source_id").notNull(),
+		title: text("title"),
+		body: text("body"),
+		actionUrl: text("action_url"),
+		readAt: timestamp("read_at"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("notifications_recipientUserId_createdAt_idx").on(
+			table.recipientUserId,
+			table.createdAt,
+		),
+		index("notifications_recipientUserId_type_createdAt_idx").on(
+			table.recipientUserId,
+			table.type,
+			table.createdAt,
+		),
+		index("notifications_postId_idx").on(table.postId),
+		index("notifications_quotePostId_idx").on(table.quotePostId),
+		index("notifications_actorUserId_idx").on(table.actorUserId),
+		uniqueIndex("notifications_sourceType_sourceId_idx").on(
+			table.sourceType,
+			table.sourceId,
+		),
+	],
+);
+
 export const filesRelations = relations(files, ({ many }) => ({
 	postImages: many(postImages),
 }));
@@ -356,6 +401,12 @@ export const userRelations = relations(user, ({ many }) => ({
 	postReposts: many(postReposts),
 	following: many(follows, { relationName: "followerUser" }),
 	followers: many(follows, { relationName: "followingUser" }),
+	receivedNotifications: many(notifications, {
+		relationName: "notificationRecipientUser",
+	}),
+	actorNotifications: many(notifications, {
+		relationName: "notificationActorUser",
+	}),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -403,6 +454,12 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
 	links: many(postLinks),
 	likes: many(postLikes),
 	reposts: many(postReposts),
+	notifications: many(notifications, {
+		relationName: "notificationPost",
+	}),
+	quoteNotifications: many(notifications, {
+		relationName: "notificationQuotePost",
+	}),
 }));
 
 export const linksRelations = relations(links, ({ many }) => ({
@@ -473,5 +530,28 @@ export const followsRelations = relations(follows, ({ one }) => ({
 		fields: [follows.followingId],
 		references: [user.id],
 		relationName: "followingUser",
+	}),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+	recipient: one(user, {
+		fields: [notifications.recipientUserId],
+		references: [user.id],
+		relationName: "notificationRecipientUser",
+	}),
+	actor: one(user, {
+		fields: [notifications.actorUserId],
+		references: [user.id],
+		relationName: "notificationActorUser",
+	}),
+	post: one(posts, {
+		fields: [notifications.postId],
+		references: [posts.id],
+		relationName: "notificationPost",
+	}),
+	quotePost: one(posts, {
+		fields: [notifications.quotePostId],
+		references: [posts.id],
+		relationName: "notificationQuotePost",
 	}),
 }));

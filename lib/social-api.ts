@@ -118,6 +118,33 @@ export type FollowListResponse = {
 	users: UserSummary[];
 };
 
+export type NotificationFilter =
+	| "all"
+	| "follow"
+	| "like"
+	| "repost"
+	| "quote"
+	| "info";
+
+export type NotificationType = Exclude<NotificationFilter, "all"> | "violation";
+
+export type NotificationItem = {
+	id: string;
+	type: NotificationType;
+	createdAt: string;
+	actors: UserSummary[];
+	actorCount: number;
+	post: PostSummary | null;
+	quotePost: PostSummary | null;
+	title: string | null;
+	body: string | null;
+	actionUrl: string | null;
+};
+
+type NotificationsResponse = {
+	items: NotificationItem[];
+};
+
 export type DeveloperApiTokenSummary = {
 	id: string;
 	name: string;
@@ -161,6 +188,27 @@ export const fetchDiscoverData = async (
 	return {
 		trends: body.trends ?? [],
 		suggestedUsers: body.suggestedUsers ?? [],
+	};
+};
+
+export const fetchNotifications = async (
+	type: NotificationFilter = "all",
+): Promise<NotificationsResponse> => {
+	const query = type === "all" ? "" : `?type=${encodeURIComponent(type)}`;
+	const response = await fetch(`/api/notifications${query}`, {
+		credentials: "include",
+		cache: "no-store",
+	});
+	const body = (await response.json()) as NotificationsResponse & {
+		error?: string;
+	};
+
+	if (!response.ok) {
+		throw new Error(body.error ?? "Failed to fetch notifications");
+	}
+
+	return {
+		items: body.items ?? [],
 	};
 };
 

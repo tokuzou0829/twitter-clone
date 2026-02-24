@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
@@ -201,6 +201,107 @@ describe("/routes/posts", () => {
 		expect(quoteResponse.status).toBe(201);
 		expect(quoted.post.quotePostId).toBe(created.post.id);
 		expect(quoted.post.content).toBe("my comment");
+	});
+
+	it("他ユーザーへのいいね通知は作成され解除で削除される", async () => {
+		const liker = await createUser();
+		const authorId = "notification_like_author";
+		const targetPostId = "notification_like_post";
+
+		await db.insert(schema.user).values({
+			id: authorId,
+			name: "Notification Author",
+			email: "notification-like-author@example.com",
+		});
+		await db.insert(schema.posts).values({
+			id: targetPostId,
+			authorId,
+			content: "target post",
+		});
+
+		const likeResponse = await app.request(`/${targetPostId}/likes`, {
+			method: "POST",
+		});
+
+		const [savedNotification] = await db
+			.select({
+				id: schema.notifications.id,
+				type: schema.notifications.type,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, authorId),
+					eq(schema.notifications.actorUserId, liker.id),
+					eq(schema.notifications.type, "like"),
+					eq(schema.notifications.postId, targetPostId),
+				),
+			)
+			.limit(1);
+
+		const unlikeResponse = await app.request(`/${targetPostId}/likes`, {
+			method: "DELETE",
+		});
+
+		const [remainingNotification] = await db
+			.select({ id: schema.notifications.id })
+			.from(schema.notifications)
+			.where(eq(schema.notifications.id, savedNotification?.id ?? ""))
+			.limit(1);
+
+		expect(likeResponse.status).toBe(200);
+		expect(savedNotification?.type).toBe("like");
+		expect(unlikeResponse.status).toBe(200);
+		expect(remainingNotification).toBeUndefined();
+	});
+
+	it("他ユーザー投稿を引用すると引用通知が作成される", async () => {
+		const quoter = await createUser();
+		const authorId = "notification_quote_author";
+		const targetPostId = "notification_quote_target_post";
+
+		await db.insert(schema.user).values({
+			id: authorId,
+			name: "Quote Target",
+			email: "notification-quote-author@example.com",
+		});
+		await db.insert(schema.posts).values({
+			id: targetPostId,
+			authorId,
+			content: "quote target",
+		});
+
+		const quoteFormData = new FormData();
+		quoteFormData.set("content", "my quote");
+
+		const quoteResponse = await app.request(`/${targetPostId}/quotes`, {
+			method: "POST",
+			body: quoteFormData,
+		});
+		const quoted = (await quoteResponse.json()) as {
+			post: { id: string };
+		};
+
+		const [savedNotification] = await db
+			.select({
+				type: schema.notifications.type,
+				postId: schema.notifications.postId,
+				quotePostId: schema.notifications.quotePostId,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, authorId),
+					eq(schema.notifications.actorUserId, quoter.id),
+					eq(schema.notifications.type, "quote"),
+				),
+			)
+			.limit(1);
+
+		expect(quoteResponse.status).toBe(201);
+		expect(savedNotification?.type).toBe("quote");
+		expect(savedNotification?.postId).toBe(targetPostId);
+		expect(savedNotification?.quotePostId).toBe(quoted.post.id);
 	});
 
 	it("未ログイン時は投稿を削除できない", async () => {

@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, count, desc, eq, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -264,15 +264,15 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { userId } = c.req.valid("param");
+			const db = c.get("db");
 
 			if (user.id === userId) {
 				throw new ValidationError("You cannot follow yourself");
 			}
 
-			await assertUserExists(c.get("db"), userId);
+			await assertUserExists(db, userId);
 
-			await c
-				.get("db")
+			const [savedFollow] = await db
 				.insert(schema.follows)
 				.values({
 					id: uuidv7(),
@@ -282,9 +282,33 @@ const app = createHonoApp()
 				})
 				.onConflictDoNothing({
 					target: [schema.follows.followerId, schema.follows.followingId],
+				})
+				.returning({
+					id: schema.follows.id,
 				});
 
-			const profile = await buildProfileResponse(c.get("db"), userId, user.id);
+			if (savedFollow) {
+				await db
+					.insert(schema.notifications)
+					.values({
+						id: uuidv7(),
+						recipientUserId: userId,
+						actorUserId: user.id,
+						type: "follow",
+						sourceType: "follow",
+						sourceId: savedFollow.id,
+						actionUrl: `/users/${user.id}`,
+						createdAt: new Date(),
+					})
+					.onConflictDoNothing({
+						target: [
+							schema.notifications.sourceType,
+							schema.notifications.sourceId,
+						],
+					});
+			}
+
+			const profile = await buildProfileResponse(db, userId, user.id);
 			return c.json(profile);
 		},
 	)
@@ -294,18 +318,33 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { userId } = c.req.valid("param");
+			const db = c.get("db");
 
-			await c
-				.get("db")
+			const deletedFollows = await db
 				.delete(schema.follows)
 				.where(
 					and(
 						eq(schema.follows.followerId, user.id),
 						eq(schema.follows.followingId, userId),
 					),
-				);
+				)
+				.returning({
+					id: schema.follows.id,
+				});
 
-			const profile = await buildProfileResponse(c.get("db"), userId, user.id);
+			if (deletedFollows.length > 0) {
+				await db.delete(schema.notifications).where(
+					and(
+						eq(schema.notifications.sourceType, "follow"),
+						inArray(
+							schema.notifications.sourceId,
+							deletedFollows.map((follow) => follow.id),
+						),
+					),
+				);
+			}
+
+			const profile = await buildProfileResponse(db, userId, user.id);
 			return c.json(profile);
 		},
 	);

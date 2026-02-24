@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -159,15 +159,16 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			await assertPostExists(c.get("db"), postId);
+			const db = c.get("db");
+			const targetPost = await assertPostExists(db, postId);
 
 			const formData = await c.req.formData();
 			const payload = parsePostFormData(formData, { allowEmpty: true });
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-			const fileRepository = createFileRepository(client, c.get("db"), baseUrl);
+			const fileRepository = createFileRepository(client, db, baseUrl);
 			const post = await createPostWithImages({
-				db: c.get("db"),
+				db,
 				fileRepository,
 				bucketName,
 				publicUrl,
@@ -176,6 +177,17 @@ const app = createHonoApp()
 				links: payload.links,
 				images: payload.images,
 				quotePostId: postId,
+			});
+
+			await createNotificationIfNeeded(db, {
+				recipientUserId: targetPost.authorId,
+				actorUserId: user.id,
+				type: "quote",
+				postId,
+				quotePostId: post.id,
+				sourceType: "quote_post",
+				sourceId: post.id,
+				actionUrl: `/posts/${post.id}`,
 			});
 
 			return c.json({ post }, 201);
@@ -286,10 +298,10 @@ const app = createHonoApp()
 	.post("/:postId/likes", zValidator("param", postIdParamSchema), async (c) => {
 		const { user } = await getUserOrThrow(c);
 		const { postId } = c.req.valid("param");
-		await assertPostExists(c.get("db"), postId);
+		const db = c.get("db");
+		const targetPost = await assertPostExists(db, postId);
 
-		await c
-			.get("db")
+		const [savedLike] = await db
 			.insert(schema.postLikes)
 			.values({
 				id: uuidv7(),
@@ -298,13 +310,24 @@ const app = createHonoApp()
 			})
 			.onConflictDoNothing({
 				target: [schema.postLikes.postId, schema.postLikes.userId],
+			})
+			.returning({
+				id: schema.postLikes.id,
 			});
 
-		const summary = await getPostInteractionSummary(
-			c.get("db"),
-			postId,
-			user.id,
-		);
+		if (savedLike) {
+			await createNotificationIfNeeded(db, {
+				recipientUserId: targetPost.authorId,
+				actorUserId: user.id,
+				type: "like",
+				postId,
+				sourceType: "post_like",
+				sourceId: savedLike.id,
+				actionUrl: `/posts/${postId}`,
+			});
+		}
+
+		const summary = await getPostInteractionSummary(db, postId, user.id);
 		return c.json(summary);
 	})
 	.delete(
@@ -313,22 +336,27 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
+			const db = c.get("db");
 
-			await c
-				.get("db")
+			const deletedLikes = await db
 				.delete(schema.postLikes)
 				.where(
 					and(
 						eq(schema.postLikes.postId, postId),
 						eq(schema.postLikes.userId, user.id),
 					),
-				);
+				)
+				.returning({
+					id: schema.postLikes.id,
+				});
 
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
-				postId,
-				user.id,
+			await removeNotificationsBySource(
+				db,
+				"post_like",
+				deletedLikes.map((like) => like.id),
 			);
+
+			const summary = await getPostInteractionSummary(db, postId, user.id);
 			return c.json(summary);
 		},
 	)
@@ -338,10 +366,10 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			await assertPostExists(c.get("db"), postId);
+			const db = c.get("db");
+			const targetPost = await assertPostExists(db, postId);
 
-			await c
-				.get("db")
+			const [savedRepost] = await db
 				.insert(schema.postReposts)
 				.values({
 					id: uuidv7(),
@@ -350,13 +378,24 @@ const app = createHonoApp()
 				})
 				.onConflictDoNothing({
 					target: [schema.postReposts.postId, schema.postReposts.userId],
+				})
+				.returning({
+					id: schema.postReposts.id,
 				});
 
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
-				postId,
-				user.id,
-			);
+			if (savedRepost) {
+				await createNotificationIfNeeded(db, {
+					recipientUserId: targetPost.authorId,
+					actorUserId: user.id,
+					type: "repost",
+					postId,
+					sourceType: "post_repost",
+					sourceId: savedRepost.id,
+					actionUrl: `/posts/${postId}`,
+				});
+			}
+
+			const summary = await getPostInteractionSummary(db, postId, user.id);
 			return c.json(summary);
 		},
 	)
@@ -366,22 +405,27 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
+			const db = c.get("db");
 
-			await c
-				.get("db")
+			const deletedReposts = await db
 				.delete(schema.postReposts)
 				.where(
 					and(
 						eq(schema.postReposts.postId, postId),
 						eq(schema.postReposts.userId, user.id),
 					),
-				);
+				)
+				.returning({
+					id: schema.postReposts.id,
+				});
 
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
-				postId,
-				user.id,
+			await removeNotificationsBySource(
+				db,
+				"post_repost",
+				deletedReposts.map((repost) => repost.id),
 			);
+
+			const summary = await getPostInteractionSummary(db, postId, user.id);
 			return c.json(summary);
 		},
 	);
@@ -553,7 +597,10 @@ const createPostWithImages = async (params: {
 
 const assertPostExists = async (db: Database, postId: string) => {
 	const [post] = await db
-		.select({ id: schema.posts.id })
+		.select({
+			id: schema.posts.id,
+			authorId: schema.posts.authorId,
+		})
 		.from(schema.posts)
 		.where(eq(schema.posts.id, postId))
 		.limit(1);
@@ -561,6 +608,74 @@ const assertPostExists = async (db: Database, postId: string) => {
 	if (!post) {
 		throw new HTTPException(404, { message: "Post not found" });
 	}
+
+	return post;
+};
+
+const createNotificationIfNeeded = async (
+	db: Database,
+	params: {
+		recipientUserId: string;
+		actorUserId: string;
+		type: "like" | "repost" | "quote";
+		postId: string;
+		quotePostId?: string;
+		sourceType: string;
+		sourceId: string;
+		actionUrl: string;
+	},
+) => {
+	const {
+		recipientUserId,
+		actorUserId,
+		type,
+		postId,
+		quotePostId,
+		sourceType,
+		sourceId,
+		actionUrl,
+	} = params;
+
+	if (recipientUserId === actorUserId) {
+		return;
+	}
+
+	await db
+		.insert(schema.notifications)
+		.values({
+			id: uuidv7(),
+			recipientUserId,
+			actorUserId,
+			type,
+			postId,
+			quotePostId: quotePostId ?? null,
+			sourceType,
+			sourceId,
+			actionUrl,
+			createdAt: new Date(),
+		})
+		.onConflictDoNothing({
+			target: [schema.notifications.sourceType, schema.notifications.sourceId],
+		});
+};
+
+const removeNotificationsBySource = async (
+	db: Database,
+	sourceType: string,
+	sourceIds: string[],
+) => {
+	if (sourceIds.length === 0) {
+		return;
+	}
+
+	await db
+		.delete(schema.notifications)
+		.where(
+			and(
+				eq(schema.notifications.sourceType, sourceType),
+				inArray(schema.notifications.sourceId, sourceIds),
+			),
+		);
 };
 
 const loadConversationPathIds = async (db: Database, postId: string) => {

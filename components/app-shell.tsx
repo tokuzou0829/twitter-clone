@@ -1,6 +1,14 @@
 "use client";
 
-import { Home, LogIn, Search, Sparkles, User, UserPlus } from "lucide-react";
+import {
+	Bell,
+	Home,
+	LogIn,
+	Search,
+	Sparkles,
+	User,
+	UserPlus,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -49,6 +57,12 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 					href: "/search",
 					icon: <Search className="h-7 w-7" />,
 					match: (value) => value.startsWith("/search"),
+				},
+				{
+					label: "通知",
+					href: "/notifications",
+					icon: <Bell className="h-7 w-7" />,
+					match: (value) => value.startsWith("/notifications"),
 				},
 				{
 					label: "プロフィール",
@@ -129,7 +143,7 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 		};
 	}, [sessionUserId]);
 
-	const mobileNavGridClassName = session?.user ? "grid-cols-3" : "grid-cols-4";
+	const mobileNavGridClassName = "grid-cols-4";
 
 	return (
 		<div className="min-h-screen">

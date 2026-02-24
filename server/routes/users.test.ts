@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
@@ -167,6 +167,51 @@ describe("/routes/users", () => {
 		expect(unfollowed.stats.followers).toBe(0);
 
 		expect(currentUser.id).toBe("test_user_id");
+	});
+
+	it("フォロー通知は作成され解除で削除される", async () => {
+		const follower = await createUser();
+		const targetUserId = "follow_notification_target";
+
+		await db.insert(schema.user).values({
+			id: targetUserId,
+			name: "Follow Target",
+			email: "follow-notification-target@example.com",
+		});
+
+		const followResponse = await app.request(`/${targetUserId}/follow`, {
+			method: "POST",
+		});
+
+		const [savedNotification] = await db
+			.select({
+				id: schema.notifications.id,
+				type: schema.notifications.type,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, targetUserId),
+					eq(schema.notifications.actorUserId, follower.id),
+					eq(schema.notifications.type, "follow"),
+				),
+			)
+			.limit(1);
+
+		const unfollowResponse = await app.request(`/${targetUserId}/follow`, {
+			method: "DELETE",
+		});
+
+		const [remainingNotification] = await db
+			.select({ id: schema.notifications.id })
+			.from(schema.notifications)
+			.where(eq(schema.notifications.id, savedNotification?.id ?? ""))
+			.limit(1);
+
+		expect(followResponse.status).toBe(200);
+		expect(savedNotification?.type).toBe("follow");
+		expect(unfollowResponse.status).toBe(200);
+		expect(remainingNotification).toBeUndefined();
 	});
 
 	it("フォロワー一覧を取得できる", async () => {
