@@ -69,6 +69,17 @@ pnpm users:ban -- --user-id "user_123" --unban --apply
 - default mode is `ban`
 - in `ban` mode, active sessions are deleted and developer API tokens are revoked
 
+Reset a user's password by user id:
+
+```bash
+pnpm users:password-reset -- --user-id "user_123" --new-password "TempPass123!"
+NEW_PASSWORD="TempPass123!" pnpm users:password-reset -- --user-id "user_123" --new-password-env NEW_PASSWORD --apply
+```
+
+- default is dry-run (no update)
+- specify exactly one of `--new-password` or `--new-password-env`
+- applying reset updates credential account password hash and deletes active sessions
+
 Ban or unban an IP/CIDR:
 
 ```bash

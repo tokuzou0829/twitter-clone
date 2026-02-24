@@ -21,6 +21,7 @@
 		"posts:delete": "node scripts/delete-posts.mjs",
 		"notifications:send": "node scripts/send-notification.mjs",
 		"users:ban": "node scripts/ban-user.mjs",
+		"users:password-reset": "node scripts/reset-user-password.mjs",
 		"ips:ban": "node scripts/ban-ip.mjs"
 	},
 	"dependencies": {
