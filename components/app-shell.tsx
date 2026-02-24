@@ -434,7 +434,7 @@ function DefaultRightColumn({
 					</p>
 				) : (
 					<ul>
-						{trends.map((trend) => (
+						{trends.slice(0, 5).map((trend) => (
 							<li key={trend.tag}>
 								<Link
 									href={`/search?q=${encodeURIComponent(trend.tag)}`}
