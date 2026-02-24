@@ -78,3 +78,16 @@ pnpm ips:ban -- --ip "203.0.113.10" --unban --apply
 ```
 
 - single IP input is normalized to `/32` (IPv4) or `/128` (IPv6)
+
+Send system notifications (INFO / violation):
+
+```bash
+pnpm notifications:send -- --user-id "user_123" --title "Service update" --body "We changed the posting policy"
+pnpm notifications:send -- --user-id "user_123" --user-id "user_456" --title "Service update" --body "We changed the posting policy" --apply
+pnpm notifications:send -- --all --title "Maintenance" --body "Scheduled maintenance starts at 02:00 UTC" --campaign-key "maintenance_2026_02" --apply
+```
+
+- default is dry-run (no insert)
+- specify either `--user-id` (repeatable) or `--all`
+- `--all` excludes banned users by default (`--include-banned` to include)
+- `--campaign-key` makes reruns idempotent per recipient (duplicate rows are skipped)

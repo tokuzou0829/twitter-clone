@@ -19,6 +19,7 @@
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
 		"posts:delete": "node scripts/delete-posts.mjs",
+		"notifications:send": "node scripts/send-notification.mjs",
 		"users:ban": "node scripts/ban-user.mjs",
 		"ips:ban": "node scripts/ban-ip.mjs"
 	},
