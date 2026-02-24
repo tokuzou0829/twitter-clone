@@ -159,6 +159,18 @@ export type DeveloperApiTokenSummary = {
 	revokedAt: string | null;
 };
 
+export type DeveloperNotificationWebhookSummary = {
+	id: string;
+	name: string;
+	endpoint: string;
+	isActive: boolean;
+	lastSentAt: string | null;
+	lastStatusCode: number | null;
+	lastError: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
 type PostInteractionSummary = {
 	postId: string;
 	liked: boolean;
@@ -470,6 +482,25 @@ export const fetchDeveloperApiTokens = async (): Promise<
 	}
 
 	return body.tokens ?? [];
+};
+
+export const fetchDeveloperNotificationWebhooks = async (): Promise<
+	DeveloperNotificationWebhookSummary[]
+> => {
+	const response = await fetch("/api/developer/notification-webhooks", {
+		credentials: "include",
+		cache: "no-store",
+	});
+	const body = (await response.json()) as {
+		webhooks?: DeveloperNotificationWebhookSummary[];
+		error?: string;
+	};
+
+	if (!response.ok) {
+		throw new Error(body.error ?? "Failed to fetch notification webhooks");
+	}
+
+	return body.webhooks ?? [];
 };
 
 export const issueDeveloperApiToken = async (

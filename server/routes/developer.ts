@@ -333,6 +333,19 @@ const app = createHonoApp()
 			});
 		},
 	)
+	.get("/notification-webhooks", async (c) => {
+		const { user } = await getDeveloperUserOrThrow(c);
+		const webhookRows = await c
+			.get("db")
+			.select(developerNotificationWebhookSelection)
+			.from(schema.developerNotificationWebhooks)
+			.where(eq(schema.developerNotificationWebhooks.userId, user.id))
+			.orderBy(desc(schema.developerNotificationWebhooks.createdAt));
+
+		return c.json({
+			webhooks: webhookRows.map(toDeveloperNotificationWebhookSummary),
+		});
+	})
 	.get("/v1/profile", async (c) => {
 		const user = await getDeveloperApiUserOrThrow(c);
 		const profile = await buildDeveloperProfile(c.get("db"), user.id);

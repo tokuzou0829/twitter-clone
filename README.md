@@ -39,6 +39,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 - Portal (Link Preview): `/developer/link-preview`
 - Portal (API Tokens): `/developer/api-tokens`
+- Portal (Notification Webhooks): `/developer/notification-webhooks`
 - Docs: `/developer/docs`
 - API base: `/api/developer`
 

@@ -8,6 +8,7 @@ import {
 	Link2,
 	Lock,
 	type LucideIcon,
+	Webhook,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -20,10 +21,14 @@ import {
 } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { DeveloperApiTokenManager } from "./developer-api-token-manager";
+import { DeveloperNotificationWebhookStatus } from "./developer-notification-webhook-status";
 import { LinkPreviewCard } from "./link-preview-card";
 import { Modal } from "./modal";
 
-type DeveloperPortalTool = "link-preview" | "api-tokens";
+type DeveloperPortalTool =
+	| "link-preview"
+	| "api-tokens"
+	| "notification-webhooks";
 
 type DeveloperPortalPageProps = {
 	tool: DeveloperPortalTool;
@@ -56,6 +61,14 @@ const DEVELOPER_TOOLS: DeveloperTool[] = [
 		href: "/developer/api-tokens",
 	},
 	{
+		id: "notification-webhooks",
+		label: "Notification Webhooks",
+		description: "購読状況と配信結果を確認",
+		icon: Webhook,
+		disabled: false,
+		href: "/developer/notification-webhooks",
+	},
+	{
 		id: "developer-docs",
 		label: "Developer API Docs",
 		description: "仕様とサンプル",
@@ -75,6 +88,7 @@ const DEVELOPER_TOOLS: DeveloperTool[] = [
 const ACTIVE_HREF_BY_TOOL: Record<DeveloperPortalTool, string> = {
 	"link-preview": "/developer/link-preview",
 	"api-tokens": "/developer/api-tokens",
+	"notification-webhooks": "/developer/notification-webhooks",
 };
 
 export function DeveloperPortalPage({ tool }: DeveloperPortalPageProps) {
@@ -476,8 +490,14 @@ export function DeveloperPortalPage({ tool }: DeveloperPortalPageProps) {
 									</div>
 								</section>
 							</>
-						) : (
+						) : tool === "api-tokens" ? (
 							<DeveloperApiTokenManager
+								isDeveloper={isDeveloper}
+								sessionUserId={sessionUserId}
+								onRequireDeveloper={() => setIsOptInModalOpen(true)}
+							/>
+						) : (
+							<DeveloperNotificationWebhookStatus
 								isDeveloper={isDeveloper}
 								sessionUserId={sessionUserId}
 								onRequireDeveloper={() => setIsOptInModalOpen(true)}

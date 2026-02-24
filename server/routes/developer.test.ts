@@ -58,6 +58,14 @@ describe("/routes/developer", () => {
 		expect(response.status).toBe(401);
 	});
 
+	it("未ログイン時に /notification-webhooks は利用できない", async () => {
+		const response = await app.request("/notification-webhooks", {
+			method: "GET",
+		});
+
+		expect(response.status).toBe(401);
+	});
+
 	it("開発者ではないユーザーは /tokens 発行ができない", async () => {
 		await createUser();
 
@@ -69,6 +77,16 @@ describe("/routes/developer", () => {
 			body: JSON.stringify({
 				name: "No Access",
 			}),
+		});
+
+		expect(response.status).toBe(403);
+	});
+
+	it("開発者ではないユーザーは /notification-webhooks を取得できない", async () => {
+		await createUser();
+
+		const response = await app.request("/notification-webhooks", {
+			method: "GET",
 		});
 
 		expect(response.status).toBe(403);
@@ -119,6 +137,62 @@ describe("/routes/developer", () => {
 		expect(revokeResponse.status).toBe(200);
 		expect(revoked.token.id).toBe(created.token.id);
 		expect(revoked.token.revokedAt).not.toBeNull();
+	});
+
+	it("開発者はWebhook購読状況を一覧取得できる", async () => {
+		await createUser({ isDeveloper: true });
+
+		await db.insert(schema.developerNotificationWebhooks).values([
+			{
+				id: "developer_webhook_status_active",
+				userId: "test_user_id",
+				name: "Main Hook",
+				endpoint: "https://hooks.example.com/main",
+				secret: "whsec_main",
+				isActive: true,
+				lastSentAt: new Date("2026-01-03T00:00:00.000Z"),
+				lastStatusCode: 200,
+			},
+			{
+				id: "developer_webhook_status_inactive",
+				userId: "test_user_id",
+				name: "Backup Hook",
+				endpoint: "https://hooks.example.com/backup",
+				secret: "whsec_backup",
+				isActive: false,
+				lastError: "timeout",
+			},
+		]);
+
+		const response = await app.request("/notification-webhooks", {
+			method: "GET",
+		});
+		const body = (await response.json()) as {
+			webhooks: Array<{
+				id: string;
+				name: string;
+				endpoint: string;
+				isActive: boolean;
+				lastStatusCode: number | null;
+				lastError: string | null;
+			}>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.webhooks.length).toBe(2);
+		const mainHook = body.webhooks.find(
+			(webhook) => webhook.id === "developer_webhook_status_active",
+		);
+		const backupHook = body.webhooks.find(
+			(webhook) => webhook.id === "developer_webhook_status_inactive",
+		);
+
+		expect(mainHook?.name).toBe("Main Hook");
+		expect(mainHook?.isActive).toBe(true);
+		expect(mainHook?.lastStatusCode).toBe(200);
+		expect(backupHook?.name).toBe("Backup Hook");
+		expect(backupHook?.isActive).toBe(false);
+		expect(backupHook?.lastError).toBe("timeout");
 	});
 
 	it("開発者は無期限トークンを発行できる", async () => {
