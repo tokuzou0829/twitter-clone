@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
 import app from "./users";
@@ -212,6 +212,45 @@ describe("/routes/users", () => {
 		expect(savedNotification?.type).toBe("follow");
 		expect(unfollowResponse.status).toBe(200);
 		expect(remainingNotification).toBeUndefined();
+	});
+
+	it("フォロー通知作成時に通知Webhookへ配信される", async () => {
+		await createUser();
+		const targetUserId = "follow_webhook_target";
+		await db.insert(schema.user).values({
+			id: targetUserId,
+			name: "Webhook Target",
+			email: "follow-webhook-target@example.com",
+		});
+		await db.insert(schema.developerNotificationWebhooks).values({
+			id: "follow_webhook_id",
+			userId: targetUserId,
+			name: "Follow Hook",
+			endpoint: "https://hooks.example.com/follow",
+			secret: "follow-webhook-secret",
+			isActive: true,
+		});
+
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 200 }));
+
+		const response = await app.request(`/${targetUserId}/follow`, {
+			method: "POST",
+		});
+
+		const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+		const payload = JSON.parse(String(requestInit?.body ?? "{}")) as {
+			event: string;
+			trigger: { type: string } | null;
+		};
+
+		expect(response.status).toBe(200);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(payload.event).toBe("notifications.snapshot");
+		expect(payload.trigger?.type).toBe("follow");
+
+		fetchSpy.mockRestore();
 	});
 
 	it("フォロワー一覧を取得できる", async () => {

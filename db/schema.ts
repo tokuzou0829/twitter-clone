@@ -320,6 +320,36 @@ export const developerApiTokens = pgTable(
 	],
 );
 
+export const developerNotificationWebhooks = pgTable(
+	"developer_notification_webhooks",
+	{
+		id: text("id").primaryKey().notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: varchar("name", { length: 64 }).notNull(),
+		endpoint: varchar("endpoint", { length: 2048 }).notNull(),
+		secret: varchar("secret", { length: 256 }).notNull(),
+		isActive: boolean("is_active").default(true).notNull(),
+		lastSentAt: timestamp("last_sent_at"),
+		lastStatusCode: integer("last_status_code"),
+		lastError: text("last_error"),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [
+		index("developer_notification_webhooks_userId_idx").on(table.userId),
+		index("developer_notification_webhooks_createdAt_idx").on(table.createdAt),
+		uniqueIndex("developer_notification_webhooks_userId_endpoint_idx").on(
+			table.userId,
+			table.endpoint,
+		),
+	],
+);
+
 export const follows = pgTable(
 	"follows",
 	{
@@ -396,6 +426,7 @@ export const userRelations = relations(user, ({ many }) => ({
 	accounts: many(account),
 	pushSubscriptions: many(pushSubscription),
 	developerApiTokens: many(developerApiTokens),
+	developerNotificationWebhooks: many(developerNotificationWebhooks),
 	posts: many(posts),
 	postLikes: many(postLikes),
 	postReposts: many(postReposts),
@@ -515,6 +546,16 @@ export const developerApiTokensRelations = relations(
 	({ one }) => ({
 		user: one(user, {
 			fields: [developerApiTokens.userId],
+			references: [user.id],
+		}),
+	}),
+);
+
+export const developerNotificationWebhooksRelations = relations(
+	developerNotificationWebhooks,
+	({ one }) => ({
+		user: one(user, {
+			fields: [developerNotificationWebhooks.userId],
 			references: [user.id],
 		}),
 	}),

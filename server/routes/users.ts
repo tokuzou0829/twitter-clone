@@ -15,6 +15,7 @@ import { createFileRepository } from "@/server/infrastructure/repositories/file"
 import { getUserOrThrow } from "@/server/middleware/auth";
 import { createBlobFile } from "@/server/objects/file";
 import { createHonoApp } from "../create-app";
+import { dispatchNotificationWebhooksForRecipient } from "./shared/notification-webhooks";
 
 const userIdParamSchema = z.object({
 	userId: z.string().min(1),
@@ -288,7 +289,7 @@ const app = createHonoApp()
 				});
 
 			if (savedFollow) {
-				await db
+				const [savedNotification] = await db
 					.insert(schema.notifications)
 					.values({
 						id: uuidv7(),
@@ -305,7 +306,24 @@ const app = createHonoApp()
 							schema.notifications.sourceType,
 							schema.notifications.sourceId,
 						],
+					})
+					.returning({
+						id: schema.notifications.id,
 					});
+
+				if (savedNotification) {
+					await dispatchNotificationWebhooksForRecipient({
+						db,
+						publicUrl: c.get("r2").publicUrl,
+						recipientUserId: userId,
+						trigger: {
+							notificationId: savedNotification.id,
+							type: "follow",
+							sourceType: "follow",
+							sourceId: savedFollow.id,
+						},
+					}).catch(() => undefined);
+				}
 			}
 
 			const profile = await buildProfileResponse(db, userId, user.id);

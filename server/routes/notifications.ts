@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -20,14 +20,19 @@ import {
 } from "@/server/middleware/auth";
 import { PushNotification } from "@/server/objects/push-notification";
 import { PushSubscription } from "@/server/objects/push-subscription";
-import { loadPostSummaryMap } from "./shared/social";
+import { dispatchNotificationWebhooksForRecipient } from "./shared/notification-webhooks";
+import {
+	countUnreadNotifications,
+	loadNotificationItems,
+	NOTIFICATION_FILTER_VALUES,
+} from "./shared/notifications";
 
 const endpointQuerySchema = z.object({
 	endpoint: z.string().url(),
 });
 
 const notificationsQuerySchema = z.object({
-	type: z.enum(["all", "follow", "like", "repost", "quote", "info"]).optional(),
+	type: z.enum(NOTIFICATION_FILTER_VALUES).optional(),
 });
 
 const systemNotificationSchema = z.object({
@@ -38,125 +43,25 @@ const systemNotificationSchema = z.object({
 	actionUrl: z.string().trim().max(2048).nullable().optional(),
 });
 
-const MAX_NOTIFICATION_ROWS = 120;
-const MAX_NOTIFICATION_ITEMS = 60;
-const MAX_NOTIFICATION_ACTORS = 3;
-
 const app = createHonoApp()
 	.get("/unread-count", async (c) => {
 		const { user } = await getUserOrThrow(c);
-		const db = c.get("db");
-
-		const [result] = await db
-			.select({ count: count() })
-			.from(schema.notifications)
-			.where(
-				and(
-					eq(schema.notifications.recipientUserId, user.id),
-					isNull(schema.notifications.readAt),
-				),
-			);
-
-		return c.json({ count: Number(result?.count ?? 0) });
+		const count = await countUnreadNotifications(c.get("db"), user.id);
+		return c.json({ count });
 	})
 	.get("/", zValidator("query", notificationsQuerySchema), async (c) => {
 		const { user } = await getUserOrThrow(c);
 		const { type = "all" } = c.req.valid("query");
-		const db = c.get("db");
-		const isAllType = type === "all";
-
-		if (isAllType) {
-			await db
-				.update(schema.notifications)
-				.set({ readAt: new Date() })
-				.where(
-					and(
-						eq(schema.notifications.recipientUserId, user.id),
-						isNull(schema.notifications.readAt),
-					),
-				);
-		}
-
-		const rows = await db
-			.select({
-				id: schema.notifications.id,
-				type: schema.notifications.type,
-				createdAt: schema.notifications.createdAt,
-				actorUserId: schema.notifications.actorUserId,
-				postId: schema.notifications.postId,
-				quotePostId: schema.notifications.quotePostId,
-				title: schema.notifications.title,
-				body: schema.notifications.body,
-				actionUrl: schema.notifications.actionUrl,
-				actorId: schema.user.id,
-				actorName: schema.user.name,
-				actorHandle: schema.user.handle,
-				actorImage: schema.user.image,
-				actorBio: schema.user.bio,
-				actorBannerImage: schema.user.bannerImage,
-			})
-			.from(schema.notifications)
-			.leftJoin(
-				schema.user,
-				eq(schema.notifications.actorUserId, schema.user.id),
-			)
-			.where(
-				isAllType
-					? eq(schema.notifications.recipientUserId, user.id)
-					: and(
-							eq(schema.notifications.recipientUserId, user.id),
-							eq(schema.notifications.type, type),
-						),
-			)
-			.orderBy(desc(schema.notifications.createdAt))
-			.limit(MAX_NOTIFICATION_ROWS);
-
-		const stacks = stackNotificationRows(rows).slice(0, MAX_NOTIFICATION_ITEMS);
-		const postIds = [
-			...new Set(
-				stacks
-					.map((stack) => stack.postId)
-					.filter((postId): postId is string => Boolean(postId)),
-			),
-		];
-		const quotePostIds = [
-			...new Set(
-				stacks
-					.map((stack) => stack.quotePostId)
-					.filter((postId): postId is string => Boolean(postId)),
-			),
-		];
-
-		const [postMap, quotePostMap] = await Promise.all([
-			loadPostSummaryMap({
-				db,
-				publicUrl: c.get("r2").publicUrl,
-				postIds,
-				viewerId: user.id,
-			}),
-			loadPostSummaryMap({
-				db,
-				publicUrl: c.get("r2").publicUrl,
-				postIds: quotePostIds,
-				viewerId: user.id,
-			}),
-		]);
+		const items = await loadNotificationItems({
+			db: c.get("db"),
+			publicUrl: c.get("r2").publicUrl,
+			recipientUserId: user.id,
+			type,
+			markAllAsRead: type === "all",
+		});
 
 		return c.json({
-			items: stacks.map((stack) => ({
-				id: stack.id,
-				type: stack.type,
-				createdAt: stack.createdAt.toISOString(),
-				actors: stack.actors.slice(0, MAX_NOTIFICATION_ACTORS),
-				actorCount: stack.actorIds.size,
-				post: stack.postId ? (postMap.get(stack.postId) ?? null) : null,
-				quotePost: stack.quotePostId
-					? (quotePostMap.get(stack.quotePostId) ?? null)
-					: null,
-				title: stack.title,
-				body: stack.body,
-				actionUrl: resolveActionUrl(stack),
-			})),
+			items,
 		});
 	})
 	.post("/system", zValidator("json", systemNotificationSchema), async (c) => {
@@ -194,6 +99,18 @@ const app = createHonoApp()
 		if (!saved) {
 			throw new Error("Failed to create system notification");
 		}
+
+		await dispatchNotificationWebhooksForRecipient({
+			db,
+			publicUrl: c.get("r2").publicUrl,
+			recipientUserId: payload.recipientUserId,
+			trigger: {
+				notificationId: saved.id,
+				type: payload.type,
+				sourceType: "system_manual",
+				sourceId,
+			},
+		}).catch(() => undefined);
 
 		return c.json({ notificationId: saved.id }, 201);
 	})
@@ -266,166 +183,6 @@ const app = createHonoApp()
 	);
 
 export default app;
-
-type NotificationType =
-	| "follow"
-	| "like"
-	| "repost"
-	| "quote"
-	| "info"
-	| "violation";
-
-type NotificationActor = {
-	id: string;
-	name: string;
-	handle: string | null;
-	image: string | null;
-	bio: string | null;
-	bannerImage: string | null;
-};
-
-type NotificationStack = {
-	id: string;
-	type: NotificationType;
-	createdAt: Date;
-	actorIds: Set<string>;
-	actors: NotificationActor[];
-	postId: string | null;
-	quotePostId: string | null;
-	title: string | null;
-	body: string | null;
-	actionUrl: string | null;
-};
-
-const stackNotificationRows = (
-	rows: Array<{
-		id: string;
-		type: string;
-		createdAt: Date;
-		actorUserId: string | null;
-		postId: string | null;
-		quotePostId: string | null;
-		title: string | null;
-		body: string | null;
-		actionUrl: string | null;
-		actorId: string | null;
-		actorName: string | null;
-		actorHandle: string | null;
-		actorImage: string | null;
-		actorBio: string | null;
-		actorBannerImage: string | null;
-	}>,
-) => {
-	const stacks = new Map<string, NotificationStack>();
-
-	for (const row of rows) {
-		if (!isSupportedNotificationType(row.type)) {
-			continue;
-		}
-
-		const stackKey = createNotificationStackKey(row.type, row.postId, row.id);
-		const existing = stacks.get(stackKey);
-		if (!existing) {
-			stacks.set(stackKey, {
-				id: stackKey,
-				type: row.type,
-				createdAt: row.createdAt,
-				actorIds: new Set<string>(),
-				actors: [],
-				postId: row.postId,
-				quotePostId: row.quotePostId,
-				title: row.title,
-				body: row.body,
-				actionUrl: row.actionUrl,
-			});
-		}
-
-		const stack = stacks.get(stackKey);
-		if (!stack) {
-			continue;
-		}
-
-		if (row.createdAt > stack.createdAt) {
-			stack.createdAt = row.createdAt;
-		}
-		if (!stack.quotePostId && row.quotePostId) {
-			stack.quotePostId = row.quotePostId;
-		}
-		if (!stack.title && row.title) {
-			stack.title = row.title;
-		}
-		if (!stack.body && row.body) {
-			stack.body = row.body;
-		}
-		if (!stack.actionUrl && row.actionUrl) {
-			stack.actionUrl = row.actionUrl;
-		}
-
-		if (!row.actorUserId || !row.actorId || !row.actorName) {
-			continue;
-		}
-		if (stack.actorIds.has(row.actorUserId)) {
-			continue;
-		}
-
-		stack.actorIds.add(row.actorUserId);
-		stack.actors.push({
-			id: row.actorId,
-			name: row.actorName,
-			handle: row.actorHandle,
-			image: row.actorImage,
-			bio: row.actorBio,
-			bannerImage: row.actorBannerImage,
-		});
-	}
-
-	return [...stacks.values()];
-};
-
-const resolveActionUrl = (stack: NotificationStack) => {
-	if (stack.actionUrl) {
-		return stack.actionUrl;
-	}
-
-	if (stack.type === "follow") {
-		const primaryActor = stack.actors[0];
-		return primaryActor ? `/users/${primaryActor.id}` : null;
-	}
-
-	if (stack.type === "quote" && stack.quotePostId) {
-		return `/posts/${stack.quotePostId}`;
-	}
-
-	if (stack.postId) {
-		return `/posts/${stack.postId}`;
-	}
-
-	return null;
-};
-
-const isSupportedNotificationType = (
-	value: string,
-): value is NotificationType => {
-	return ["follow", "like", "repost", "quote", "info", "violation"].includes(
-		value,
-	);
-};
-
-const createNotificationStackKey = (
-	type: NotificationType,
-	postId: string | null,
-	notificationId: string,
-) => {
-	if (type === "follow") {
-		return "follow";
-	}
-
-	if ((type === "like" || type === "repost" || type === "quote") && postId) {
-		return `${type}:${postId}`;
-	}
-
-	return `${type}:${notificationId}`;
-};
 
 const normalizeActionUrl = (value: string | null | undefined) => {
 	if (!value) {

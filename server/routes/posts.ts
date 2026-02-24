@@ -16,6 +16,7 @@ import { createFileRepository } from "@/server/infrastructure/repositories/file"
 import { getUserOrThrow } from "@/server/middleware/auth";
 import { createBlobFile } from "@/server/objects/file";
 import { createHonoApp } from "../create-app";
+import { dispatchNotificationWebhooksForRecipient } from "./shared/notification-webhooks";
 import { loadPostSummaryMap, loadTimelineItems } from "./shared/social";
 
 const timelineQuerySchema = z.object({
@@ -179,7 +180,7 @@ const app = createHonoApp()
 				quotePostId: postId,
 			});
 
-			await createNotificationIfNeeded(db, {
+			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
 				recipientUserId: targetPost.authorId,
 				actorUserId: user.id,
 				type: "quote",
@@ -316,7 +317,7 @@ const app = createHonoApp()
 			});
 
 		if (savedLike) {
-			await createNotificationIfNeeded(db, {
+			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
 				recipientUserId: targetPost.authorId,
 				actorUserId: user.id,
 				type: "like",
@@ -384,7 +385,7 @@ const app = createHonoApp()
 				});
 
 			if (savedRepost) {
-				await createNotificationIfNeeded(db, {
+				await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
 					recipientUserId: targetPost.authorId,
 					actorUserId: user.id,
 					type: "repost",
@@ -614,6 +615,7 @@ const assertPostExists = async (db: Database, postId: string) => {
 
 const createNotificationIfNeeded = async (
 	db: Database,
+	publicUrl: string,
 	params: {
 		recipientUserId: string;
 		actorUserId: string;
@@ -640,7 +642,7 @@ const createNotificationIfNeeded = async (
 		return;
 	}
 
-	await db
+	const [savedNotification] = await db
 		.insert(schema.notifications)
 		.values({
 			id: uuidv7(),
@@ -656,7 +658,26 @@ const createNotificationIfNeeded = async (
 		})
 		.onConflictDoNothing({
 			target: [schema.notifications.sourceType, schema.notifications.sourceId],
+		})
+		.returning({
+			id: schema.notifications.id,
 		});
+
+	if (!savedNotification) {
+		return;
+	}
+
+	await dispatchNotificationWebhooksForRecipient({
+		db,
+		publicUrl,
+		recipientUserId,
+		trigger: {
+			notificationId: savedNotification.id,
+			type,
+			sourceType,
+			sourceId,
+		},
+	}).catch(() => undefined);
 };
 
 const removeNotificationsBySource = async (

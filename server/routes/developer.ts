@@ -22,6 +22,17 @@ import { createFileRepository } from "@/server/infrastructure/repositories/file"
 import { getDeveloperUserOrThrow } from "@/server/middleware/auth";
 import { createBlobFile } from "@/server/objects/file";
 import { createHonoApp } from "../create-app";
+import {
+	assertSupportedWebhookEndpoint,
+	buildNotificationWebhookPayload,
+	deliverStoredNotificationWebhooks,
+	sendAdHocNotificationWebhook,
+} from "./shared/notification-webhooks";
+import {
+	countUnreadNotifications,
+	loadNotificationItems,
+	NOTIFICATION_FILTER_VALUES,
+} from "./shared/notifications";
 import { loadPostSummaryMap } from "./shared/social";
 
 const MAX_PROFILE_NAME_LENGTH = 50;
@@ -35,6 +46,13 @@ const DEVELOPER_API_TOKEN_MAX_EXPIRES_IN_DAYS = 365;
 const DEVELOPER_API_TOKEN_RANDOM_BYTES = 32;
 
 const DEVELOPER_API_TOKEN_DEFAULT_EXPIRES_IN_DAYS = 90;
+
+const DEVELOPER_NOTIFICATION_WEBHOOK_NAME_MAX_LENGTH = 64;
+const DEVELOPER_NOTIFICATION_WEBHOOK_ENDPOINT_MAX_LENGTH = 2048;
+const DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MIN_LENGTH = 8;
+const DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MAX_LENGTH = 256;
+const DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_PREFIX = "nmt_whsec_";
+const DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_RANDOM_BYTES = 24;
 
 const DEVELOPER_API_POST_LIMITS = {
 	maxImages: 2,
@@ -75,6 +93,114 @@ const postIdParamSchema = z.object({
 	postId: z.string().min(1),
 });
 
+const developerNotificationsQuerySchema = z.object({
+	type: z.enum(NOTIFICATION_FILTER_VALUES).optional(),
+	markAsRead: z.enum(["true", "false"]).optional(),
+});
+
+const webhookIdParamSchema = z.object({
+	webhookId: z.string().min(1),
+});
+
+const webhookCreateSchema = z.object({
+	name: z
+		.string()
+		.trim()
+		.min(1)
+		.max(DEVELOPER_NOTIFICATION_WEBHOOK_NAME_MAX_LENGTH),
+	endpoint: z
+		.string()
+		.trim()
+		.url()
+		.max(DEVELOPER_NOTIFICATION_WEBHOOK_ENDPOINT_MAX_LENGTH),
+	secret: z
+		.string()
+		.trim()
+		.min(DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MIN_LENGTH)
+		.max(DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MAX_LENGTH)
+		.optional(),
+	isActive: z.boolean().optional(),
+});
+
+const webhookPatchSchema = z
+	.object({
+		name: z
+			.string()
+			.trim()
+			.min(1)
+			.max(DEVELOPER_NOTIFICATION_WEBHOOK_NAME_MAX_LENGTH)
+			.optional(),
+		endpoint: z
+			.string()
+			.trim()
+			.url()
+			.max(DEVELOPER_NOTIFICATION_WEBHOOK_ENDPOINT_MAX_LENGTH)
+			.optional(),
+		secret: z
+			.string()
+			.trim()
+			.min(DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MIN_LENGTH)
+			.max(DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MAX_LENGTH)
+			.optional(),
+		rotateSecret: z.boolean().optional(),
+		isActive: z.boolean().optional(),
+	})
+	.refine((payload) => Object.keys(payload).length > 0, {
+		message: "At least one webhook field is required",
+	})
+	.superRefine((payload, ctx) => {
+		if (payload.rotateSecret && payload.secret) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "rotateSecret and secret cannot be set together",
+				path: ["secret"],
+			});
+		}
+	});
+
+const webhookSendSchema = z
+	.object({
+		webhookId: z.string().trim().min(1).optional(),
+		endpoint: z
+			.string()
+			.trim()
+			.url()
+			.max(DEVELOPER_NOTIFICATION_WEBHOOK_ENDPOINT_MAX_LENGTH)
+			.optional(),
+		secret: z
+			.string()
+			.trim()
+			.min(DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MIN_LENGTH)
+			.max(DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_MAX_LENGTH)
+			.optional(),
+		type: z.enum(NOTIFICATION_FILTER_VALUES).optional(),
+	})
+	.superRefine((payload, ctx) => {
+		if (payload.webhookId && payload.endpoint) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "webhookId and endpoint cannot be set together",
+				path: ["endpoint"],
+			});
+		}
+
+		if (payload.secret && !payload.endpoint) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "secret requires endpoint",
+				path: ["secret"],
+			});
+		}
+
+		if (payload.endpoint && !payload.secret) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "secret is required for ad-hoc endpoint delivery",
+				path: ["secret"],
+			});
+		}
+	});
+
 const developerApiTokenSelection = {
 	id: schema.developerApiTokens.id,
 	name: schema.developerApiTokens.name,
@@ -83,6 +209,20 @@ const developerApiTokenSelection = {
 	expiresAt: schema.developerApiTokens.expiresAt,
 	lastUsedAt: schema.developerApiTokens.lastUsedAt,
 	revokedAt: schema.developerApiTokens.revokedAt,
+};
+
+const developerNotificationWebhookSelection = {
+	id: schema.developerNotificationWebhooks.id,
+	userId: schema.developerNotificationWebhooks.userId,
+	name: schema.developerNotificationWebhooks.name,
+	endpoint: schema.developerNotificationWebhooks.endpoint,
+	secret: schema.developerNotificationWebhooks.secret,
+	isActive: schema.developerNotificationWebhooks.isActive,
+	lastSentAt: schema.developerNotificationWebhooks.lastSentAt,
+	lastStatusCode: schema.developerNotificationWebhooks.lastStatusCode,
+	lastError: schema.developerNotificationWebhooks.lastError,
+	createdAt: schema.developerNotificationWebhooks.createdAt,
+	updatedAt: schema.developerNotificationWebhooks.updatedAt,
 };
 
 const app = createHonoApp()
@@ -435,6 +575,302 @@ const app = createHonoApp()
 				user.id,
 			);
 			return c.json(summary);
+		},
+	)
+	.get("/v1/notifications/unread-count", async (c) => {
+		const user = await getDeveloperApiUserOrThrow(c);
+		const count = await countUnreadNotifications(c.get("db"), user.id);
+		return c.json({ count });
+	})
+	.get(
+		"/v1/notifications",
+		zValidator("query", developerNotificationsQuerySchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const { type = "all", markAsRead } = c.req.valid("query");
+			const items = await loadNotificationItems({
+				db: c.get("db"),
+				publicUrl: c.get("r2").publicUrl,
+				recipientUserId: user.id,
+				type,
+				markAllAsRead: type === "all" && markAsRead === "true",
+			});
+			const unreadCount = await countUnreadNotifications(c.get("db"), user.id);
+
+			return c.json({
+				items,
+				unreadCount,
+			});
+		},
+	)
+	.get("/v1/notifications/webhooks", async (c) => {
+		const user = await getDeveloperApiUserOrThrow(c);
+		const rows = await c
+			.get("db")
+			.select(developerNotificationWebhookSelection)
+			.from(schema.developerNotificationWebhooks)
+			.where(eq(schema.developerNotificationWebhooks.userId, user.id))
+			.orderBy(desc(schema.developerNotificationWebhooks.createdAt));
+
+		return c.json({
+			webhooks: rows.map(toDeveloperNotificationWebhookSummary),
+		});
+	})
+	.post(
+		"/v1/notifications/webhooks",
+		zValidator("json", webhookCreateSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const payload = c.req.valid("json");
+			const db = c.get("db");
+			const endpoint = assertSupportedWebhookEndpoint(payload.endpoint);
+
+			const [existing] = await db
+				.select({ id: schema.developerNotificationWebhooks.id })
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+						eq(schema.developerNotificationWebhooks.endpoint, endpoint),
+					),
+				)
+				.limit(1);
+
+			if (existing) {
+				throw new HTTPException(409, {
+					message: "Webhook endpoint is already registered",
+				});
+			}
+
+			const plainSecret =
+				payload.secret ?? createDeveloperNotificationWebhookSecret();
+			const now = new Date();
+			const [created] = await db
+				.insert(schema.developerNotificationWebhooks)
+				.values({
+					id: uuidv7(),
+					userId: user.id,
+					name: payload.name,
+					endpoint,
+					secret: plainSecret,
+					isActive: payload.isActive ?? true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning(developerNotificationWebhookSelection);
+
+			if (!created) {
+				throw new Error("Failed to create developer notification webhook");
+			}
+
+			return c.json(
+				{
+					webhook: toDeveloperNotificationWebhookSummary(created),
+					plainSecret,
+				},
+				201,
+			);
+		},
+	)
+	.patch(
+		"/v1/notifications/webhooks/:webhookId",
+		zValidator("param", webhookIdParamSchema),
+		zValidator("json", webhookPatchSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const { webhookId } = c.req.valid("param");
+			const payload = c.req.valid("json");
+			const db = c.get("db");
+
+			const [current] = await db
+				.select(developerNotificationWebhookSelection)
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.id, webhookId),
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+					),
+				)
+				.limit(1);
+
+			if (!current) {
+				throw new HTTPException(404, { message: "Webhook not found" });
+			}
+
+			const nextEndpoint =
+				payload.endpoint === undefined
+					? current.endpoint
+					: assertSupportedWebhookEndpoint(payload.endpoint);
+
+			if (nextEndpoint !== current.endpoint) {
+				const [duplicate] = await db
+					.select({ id: schema.developerNotificationWebhooks.id })
+					.from(schema.developerNotificationWebhooks)
+					.where(
+						and(
+							eq(schema.developerNotificationWebhooks.userId, user.id),
+							eq(schema.developerNotificationWebhooks.endpoint, nextEndpoint),
+							ne(schema.developerNotificationWebhooks.id, webhookId),
+						),
+					)
+					.limit(1);
+
+				if (duplicate) {
+					throw new HTTPException(409, {
+						message: "Webhook endpoint is already registered",
+					});
+				}
+			}
+
+			const plainSecret = payload.rotateSecret
+				? createDeveloperNotificationWebhookSecret()
+				: payload.secret;
+
+			const [updated] = await db
+				.update(schema.developerNotificationWebhooks)
+				.set({
+					name: payload.name ?? current.name,
+					endpoint: nextEndpoint,
+					secret: plainSecret ?? current.secret,
+					isActive: payload.isActive ?? current.isActive,
+					updatedAt: new Date(),
+				})
+				.where(eq(schema.developerNotificationWebhooks.id, webhookId))
+				.returning(developerNotificationWebhookSelection);
+
+			if (!updated) {
+				throw new Error("Failed to update developer notification webhook");
+			}
+
+			return c.json({
+				webhook: toDeveloperNotificationWebhookSummary(updated),
+				plainSecret: plainSecret ?? null,
+			});
+		},
+	)
+	.delete(
+		"/v1/notifications/webhooks/:webhookId",
+		zValidator("param", webhookIdParamSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const { webhookId } = c.req.valid("param");
+			const db = c.get("db");
+
+			const [target] = await db
+				.select({ id: schema.developerNotificationWebhooks.id })
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.id, webhookId),
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+					),
+				)
+				.limit(1);
+
+			if (!target) {
+				throw new HTTPException(404, { message: "Webhook not found" });
+			}
+
+			await db
+				.delete(schema.developerNotificationWebhooks)
+				.where(eq(schema.developerNotificationWebhooks.id, webhookId));
+
+			return c.json({ deleted: true });
+		},
+	)
+	.post(
+		"/v1/notifications/webhooks/send",
+		zValidator("json", webhookSendSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const payload = c.req.valid("json");
+			const db = c.get("db");
+			const type = payload.type ?? "all";
+			const snapshot = await buildNotificationWebhookPayload({
+				db,
+				publicUrl: c.get("r2").publicUrl,
+				recipientUserId: user.id,
+				type,
+			});
+
+			if (payload.webhookId) {
+				const [target] = await db
+					.select({
+						id: schema.developerNotificationWebhooks.id,
+						endpoint: schema.developerNotificationWebhooks.endpoint,
+						secret: schema.developerNotificationWebhooks.secret,
+					})
+					.from(schema.developerNotificationWebhooks)
+					.where(
+						and(
+							eq(schema.developerNotificationWebhooks.id, payload.webhookId),
+							eq(schema.developerNotificationWebhooks.userId, user.id),
+						),
+					)
+					.limit(1);
+
+				if (!target) {
+					throw new HTTPException(404, { message: "Webhook not found" });
+				}
+
+				const [result] = await deliverStoredNotificationWebhooks({
+					db,
+					webhooks: [target],
+					payload: snapshot,
+				});
+
+				return c.json({
+					deliveredAt: snapshot.generatedAt,
+					unreadCount: snapshot.unreadCount,
+					itemCount: snapshot.items.length,
+					results: result ? [result] : [],
+				});
+			}
+
+			if (payload.endpoint && payload.secret) {
+				const result = await sendAdHocNotificationWebhook({
+					endpoint: assertSupportedWebhookEndpoint(payload.endpoint),
+					secret: payload.secret,
+					payload: snapshot,
+				});
+
+				return c.json({
+					deliveredAt: snapshot.generatedAt,
+					unreadCount: snapshot.unreadCount,
+					itemCount: snapshot.items.length,
+					results: [result],
+				});
+			}
+
+			const webhooks = await db
+				.select({
+					id: schema.developerNotificationWebhooks.id,
+					endpoint: schema.developerNotificationWebhooks.endpoint,
+					secret: schema.developerNotificationWebhooks.secret,
+				})
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+						eq(schema.developerNotificationWebhooks.isActive, true),
+					),
+				);
+
+			const results =
+				webhooks.length > 0
+					? await deliverStoredNotificationWebhooks({
+							db,
+							webhooks,
+							payload: snapshot,
+						})
+					: [];
+
+			return c.json({
+				deliveredAt: snapshot.generatedAt,
+				unreadCount: snapshot.unreadCount,
+				itemCount: snapshot.items.length,
+				results,
+			});
 		},
 	);
 
@@ -831,6 +1267,30 @@ const toDeveloperApiTokenSummary = (token: {
 	};
 };
 
+const toDeveloperNotificationWebhookSummary = (webhook: {
+	id: string;
+	name: string;
+	endpoint: string;
+	isActive: boolean;
+	lastSentAt: Date | null;
+	lastStatusCode: number | null;
+	lastError: string | null;
+	createdAt: Date;
+	updatedAt: Date;
+}) => {
+	return {
+		id: webhook.id,
+		name: webhook.name,
+		endpoint: webhook.endpoint,
+		isActive: webhook.isActive,
+		lastSentAt: webhook.lastSentAt?.toISOString() ?? null,
+		lastStatusCode: webhook.lastStatusCode,
+		lastError: webhook.lastError,
+		createdAt: webhook.createdAt.toISOString(),
+		updatedAt: webhook.updatedAt.toISOString(),
+	};
+};
+
 const validateName = (value: string) => {
 	const normalized = value.trim();
 	if (!normalized) {
@@ -905,6 +1365,13 @@ const createDeveloperApiTokenPlaintext = () => {
 
 const createTokenPrefix = (plainToken: string) => {
 	return plainToken.slice(0, DEVELOPER_API_TOKEN_PREFIX_LENGTH);
+};
+
+const createDeveloperNotificationWebhookSecret = () => {
+	const randomPart = randomBytes(
+		DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_RANDOM_BYTES,
+	).toString("base64url");
+	return `${DEVELOPER_NOTIFICATION_WEBHOOK_SECRET_PREFIX}${randomPart}`;
 };
 
 const hashDeveloperApiToken = (plainToken: string) => {

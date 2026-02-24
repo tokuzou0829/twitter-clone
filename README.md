@@ -42,7 +42,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - Docs: `/developer/docs`
 - API base: `/api/developer`
 
-For full endpoint specs and examples, see `docs/developer-api.md`.
+For full endpoint specs and examples, open `/developer/docs` or the markdown files under `docs/developer-api/`.
 
 ## Maintenance CLI
 

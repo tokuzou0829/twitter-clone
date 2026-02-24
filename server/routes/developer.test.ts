@@ -325,6 +325,210 @@ describe("/routes/developer", () => {
 		expect(unreposted.reposts).toBe(0);
 	});
 
+	it("Bearerトークンで通知一覧と未読件数を取得できる", async () => {
+		const token = await createDeveloperApiToken();
+		const postId = "developer_notifications_post";
+
+		await db.insert(schema.user).values({
+			id: "developer_notifications_actor",
+			name: "Notify Actor",
+			email: "developer-notify-actor@example.com",
+			emailVerified: true,
+		});
+
+		await db.insert(schema.posts).values({
+			id: postId,
+			authorId: "test_user_id",
+			content: "developer notifications target",
+		});
+
+		await db.insert(schema.notifications).values([
+			{
+				id: "developer_notifications_like",
+				recipientUserId: "test_user_id",
+				actorUserId: "developer_notifications_actor",
+				type: "like",
+				postId,
+				sourceType: "post_like",
+				sourceId: "developer_notifications_like_source",
+				actionUrl: `/posts/${postId}`,
+			},
+			{
+				id: "developer_notifications_info",
+				recipientUserId: "test_user_id",
+				type: "info",
+				sourceType: "system_manual",
+				sourceId: "developer_notifications_info_source",
+				title: "Info",
+				body: "Read notification",
+				readAt: new Date("2026-01-03T00:00:00.000Z"),
+			},
+		]);
+
+		const unreadBeforeResponse = await app.request(
+			"/v1/notifications/unread-count",
+			{
+				method: "GET",
+				headers: {
+					authorization: `Bearer ${token.plainToken}`,
+				},
+			},
+		);
+		const unreadBefore = (await unreadBeforeResponse.json()) as {
+			count: number;
+		};
+
+		const listResponse = await app.request("/v1/notifications?type=like", {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+		const listed = (await listResponse.json()) as {
+			items: Array<{ type: string; actorCount: number }>;
+			unreadCount: number;
+		};
+
+		const markReadResponse = await app.request(
+			"/v1/notifications?markAsRead=true",
+			{
+				method: "GET",
+				headers: {
+					authorization: `Bearer ${token.plainToken}`,
+				},
+			},
+		);
+
+		const unreadAfterResponse = await app.request(
+			"/v1/notifications/unread-count",
+			{
+				method: "GET",
+				headers: {
+					authorization: `Bearer ${token.plainToken}`,
+				},
+			},
+		);
+		const unreadAfter = (await unreadAfterResponse.json()) as { count: number };
+
+		expect(unreadBeforeResponse.status).toBe(200);
+		expect(unreadBefore.count).toBe(1);
+		expect(listResponse.status).toBe(200);
+		expect(listed.items.length).toBe(1);
+		expect(listed.items[0]?.type).toBe("like");
+		expect(listed.items[0]?.actorCount).toBe(1);
+		expect(listed.unreadCount).toBe(1);
+		expect(markReadResponse.status).toBe(200);
+		expect(unreadAfterResponse.status).toBe(200);
+		expect(unreadAfter.count).toBe(0);
+	});
+
+	it("通知Webhookの作成・送信・削除ができる", async () => {
+		const token = await createDeveloperApiToken();
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 200 }));
+
+		const createWebhookResponse = await app.request(
+			"/v1/notifications/webhooks",
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					authorization: `Bearer ${token.plainToken}`,
+				},
+				body: JSON.stringify({
+					name: "Main Hook",
+					endpoint: "https://hooks.example.com/numatter",
+				}),
+			},
+		);
+		const created = (await createWebhookResponse.json()) as {
+			webhook: { id: string; endpoint: string };
+			plainSecret: string;
+		};
+
+		const sendResponse = await app.request("/v1/notifications/webhooks/send", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				authorization: `Bearer ${token.plainToken}`,
+			},
+			body: JSON.stringify({
+				webhookId: created.webhook.id,
+			}),
+		});
+		const sent = (await sendResponse.json()) as {
+			results: Array<{ status: string }>;
+			itemCount: number;
+			unreadCount: number;
+		};
+
+		const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+		const sentPayload = JSON.parse(String(requestInit?.body ?? "{}")) as {
+			event: string;
+			items: unknown[];
+			unreadCount: number;
+		};
+
+		const deleteWebhookResponse = await app.request(
+			`/v1/notifications/webhooks/${created.webhook.id}`,
+			{
+				method: "DELETE",
+				headers: {
+					authorization: `Bearer ${token.plainToken}`,
+				},
+			},
+		);
+
+		expect(createWebhookResponse.status).toBe(201);
+		expect(created.plainSecret.startsWith("nmt_whsec_")).toBe(true);
+		expect(sendResponse.status).toBe(200);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(sent.results[0]?.status).toBe("success");
+		expect(Array.isArray(sentPayload.items)).toBe(true);
+		expect(sentPayload.event).toBe("notifications.snapshot");
+		expect(typeof sentPayload.unreadCount).toBe("number");
+		expect(sent.itemCount).toBe(sentPayload.items.length);
+		expect(sent.unreadCount).toBe(sentPayload.unreadCount);
+		expect(deleteWebhookResponse.status).toBe(200);
+
+		fetchSpy.mockRestore();
+	});
+
+	it("通知Webhookをad-hocエンドポイントへ送信できる", async () => {
+		const token = await createDeveloperApiToken();
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 202 }));
+
+		const sendResponse = await app.request("/v1/notifications/webhooks/send", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				authorization: `Bearer ${token.plainToken}`,
+			},
+			body: JSON.stringify({
+				endpoint: "https://hooks.example.com/ad-hoc",
+				secret: "ad-hoc-secret-123456",
+			}),
+		});
+		const body = (await sendResponse.json()) as {
+			results: Array<{
+				endpoint: string;
+				status: string;
+				statusCode: number | null;
+			}>;
+		};
+
+		expect(sendResponse.status).toBe(200);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(body.results[0]?.endpoint).toBe("https://hooks.example.com/ad-hoc");
+		expect(body.results[0]?.status).toBe("success");
+		expect(body.results[0]?.statusCode).toBe(202);
+
+		fetchSpy.mockRestore();
+	});
+
 	it("失効済みBearerトークンは利用できない", async () => {
 		const token = await createDeveloperApiToken();
 

@@ -1,5 +1,5 @@
 import { and, count, eq, isNull } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 import { setup } from "@/tests/vitest.helper";
 import app from "./notifications";
@@ -317,5 +317,53 @@ describe("/routes/notifications", () => {
 		expect(response.status).toBe(201);
 		expect(saved?.type).toBe("violation");
 		expect(saved?.title).toBe("ポリシー違反");
+	});
+
+	it("system通知作成時に通知Webhookへ配信される", async () => {
+		await createUser({ isDeveloper: true });
+		const recipientUserId = "notifications_system_webhook_target";
+		await db.insert(schema.user).values({
+			id: recipientUserId,
+			name: "Webhook Recipient",
+			email: "notifications-system-webhook-target@example.com",
+		});
+		await db.insert(schema.developerNotificationWebhooks).values({
+			id: "notifications_system_webhook_id",
+			userId: recipientUserId,
+			name: "System Hook",
+			endpoint: "https://hooks.example.com/system",
+			secret: "system-webhook-secret",
+			isActive: true,
+		});
+
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 200 }));
+
+		const response = await app.request("/system", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				recipientUserId,
+				type: "info",
+				title: "System update",
+				body: "hello",
+			}),
+		});
+
+		const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+		const payload = JSON.parse(String(requestInit?.body ?? "{}")) as {
+			event: string;
+			trigger: { type: string } | null;
+		};
+
+		expect(response.status).toBe(201);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(payload.event).toBe("notifications.snapshot");
+		expect(payload.trigger?.type).toBe("info");
+
+		fetchSpy.mockRestore();
 	});
 });
