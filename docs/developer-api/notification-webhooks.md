@@ -115,3 +115,6 @@ Request examples:
 ## Automatic Delivery
 
 Registered active webhooks are automatically invoked when new notifications are created (e.g. follow, like, repost, reply, quote, system notification).
+
+`trigger.notificationId` can be used with `GET /api/developer/v1/notifications/:notificationId`
+to fetch the latest detail for that specific notification.

@@ -39,6 +39,29 @@ type NotificationStack = {
 	actionUrl: string | null;
 };
 
+type PostSummary =
+	Awaited<ReturnType<typeof loadPostSummaryMap>> extends Map<
+		string,
+		infer TValue
+	>
+		? TValue
+		: never;
+
+export type NotificationDetailItem = {
+	id: string;
+	type: NotificationType;
+	sourceType: string;
+	sourceId: string;
+	createdAt: string;
+	readAt: string | null;
+	title: string | null;
+	body: string | null;
+	actionUrl: string | null;
+	actor: NotificationActor | null;
+	post: PostSummary | null;
+	quotePost: PostSummary | null;
+};
+
 const MAX_NOTIFICATION_ROWS = 120;
 const MAX_NOTIFICATION_ITEMS = 60;
 const MAX_NOTIFICATION_ACTORS = 3;
@@ -166,6 +189,103 @@ export const loadNotificationItems = async (params: {
 	}));
 };
 
+export const loadNotificationItemById = async (params: {
+	db: Database;
+	publicUrl: string;
+	recipientUserId: string;
+	notificationId: string;
+}): Promise<NotificationDetailItem | null> => {
+	const { db, publicUrl, recipientUserId, notificationId } = params;
+	const [row] = await db
+		.select({
+			id: schema.notifications.id,
+			type: schema.notifications.type,
+			sourceType: schema.notifications.sourceType,
+			sourceId: schema.notifications.sourceId,
+			createdAt: schema.notifications.createdAt,
+			readAt: schema.notifications.readAt,
+			postId: schema.notifications.postId,
+			quotePostId: schema.notifications.quotePostId,
+			title: schema.notifications.title,
+			body: schema.notifications.body,
+			actionUrl: schema.notifications.actionUrl,
+			actorId: schema.user.id,
+			actorName: schema.user.name,
+			actorHandle: schema.user.handle,
+			actorImage: schema.user.image,
+			actorBio: schema.user.bio,
+			actorBannerImage: schema.user.bannerImage,
+		})
+		.from(schema.notifications)
+		.leftJoin(schema.user, eq(schema.notifications.actorUserId, schema.user.id))
+		.where(
+			and(
+				eq(schema.notifications.id, notificationId),
+				eq(schema.notifications.recipientUserId, recipientUserId),
+			),
+		)
+		.limit(1);
+
+	if (!row || !isSupportedNotificationType(row.type)) {
+		return null;
+	}
+
+	const postIds = row.postId ? [row.postId] : [];
+	const quotePostIds = row.quotePostId ? [row.quotePostId] : [];
+
+	const [postMap, quotePostMap] = await Promise.all([
+		loadPostSummaryMap({
+			db,
+			publicUrl,
+			postIds,
+			viewerId: recipientUserId,
+		}),
+		loadPostSummaryMap({
+			db,
+			publicUrl,
+			postIds: quotePostIds,
+			viewerId: recipientUserId,
+		}),
+	]);
+
+	const actor =
+		row.actorId && row.actorName
+			? {
+					id: row.actorId,
+					name: row.actorName,
+					handle: row.actorHandle,
+					image: row.actorImage,
+					bio: row.actorBio,
+					bannerImage: row.actorBannerImage,
+				}
+			: null;
+
+	const actionUrl = resolveDetailActionUrl({
+		actionUrl: row.actionUrl,
+		type: row.type,
+		postId: row.postId,
+		quotePostId: row.quotePostId,
+		actor,
+	});
+
+	return {
+		id: row.id,
+		type: row.type,
+		sourceType: row.sourceType,
+		sourceId: row.sourceId,
+		createdAt: row.createdAt.toISOString(),
+		readAt: row.readAt?.toISOString() ?? null,
+		title: row.title,
+		body: row.body,
+		actionUrl,
+		actor,
+		post: row.postId ? (postMap.get(row.postId) ?? null) : null,
+		quotePost: row.quotePostId
+			? (quotePostMap.get(row.quotePostId) ?? null)
+			: null,
+	};
+};
+
 const stackNotificationRows = (
 	rows: Array<{
 		id: string;
@@ -267,6 +387,32 @@ const resolveActionUrl = (stack: NotificationStack) => {
 
 	if (stack.postId) {
 		return `/posts/${stack.postId}`;
+	}
+
+	return null;
+};
+
+const resolveDetailActionUrl = (params: {
+	actionUrl: string | null;
+	type: NotificationType;
+	postId: string | null;
+	quotePostId: string | null;
+	actor: NotificationActor | null;
+}) => {
+	if (params.actionUrl) {
+		return params.actionUrl;
+	}
+
+	if (params.type === "follow") {
+		return params.actor ? `/users/${params.actor.id}` : null;
+	}
+
+	if (params.type === "quote" && params.quotePostId) {
+		return `/posts/${params.quotePostId}`;
+	}
+
+	if (params.postId) {
+		return `/posts/${params.postId}`;
 	}
 
 	return null;

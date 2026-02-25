@@ -30,6 +30,7 @@ import {
 } from "./shared/notification-webhooks";
 import {
 	countUnreadNotifications,
+	loadNotificationItemById,
 	loadNotificationItems,
 	NOTIFICATION_FILTER_VALUES,
 } from "./shared/notifications";
@@ -96,6 +97,10 @@ const postIdParamSchema = z.object({
 const developerNotificationsQuerySchema = z.object({
 	type: z.enum(NOTIFICATION_FILTER_VALUES).optional(),
 	markAsRead: z.enum(["true", "false"]).optional(),
+});
+
+const notificationIdParamSchema = z.object({
+	notificationId: z.string().trim().min(1),
 });
 
 const webhookIdParamSchema = z.object({
@@ -1099,6 +1104,26 @@ const app = createHonoApp()
 				itemCount: snapshot.items.length,
 				results,
 			});
+		},
+	)
+	.get(
+		"/v1/notifications/:notificationId",
+		zValidator("param", notificationIdParamSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const { notificationId } = c.req.valid("param");
+			const notification = await loadNotificationItemById({
+				db: c.get("db"),
+				publicUrl: c.get("r2").publicUrl,
+				recipientUserId: user.id,
+				notificationId,
+			});
+
+			if (!notification) {
+				throw new HTTPException(404, { message: "Notification not found" });
+			}
+
+			return c.json({ notification });
 		},
 	);
 

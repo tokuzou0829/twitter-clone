@@ -599,6 +599,101 @@ describe("/routes/developer", () => {
 		expect(unreadAfter.count).toBe(0);
 	});
 
+	it("BearerトークンでnotificationId指定の通知詳細を取得できる", async () => {
+		const token = await createDeveloperApiToken();
+		const actorUserId = "developer_notification_detail_actor";
+		const postId = "developer_notification_detail_post";
+		const notificationId = "developer_notification_detail_like";
+
+		await db.insert(schema.user).values({
+			id: actorUserId,
+			name: "Detail Actor",
+			email: "developer-notification-detail-actor@example.com",
+			emailVerified: true,
+		});
+
+		await db.insert(schema.posts).values({
+			id: postId,
+			authorId: "test_user_id",
+			content: "notification detail target post",
+		});
+
+		await db.insert(schema.notifications).values({
+			id: notificationId,
+			recipientUserId: "test_user_id",
+			actorUserId,
+			type: "like",
+			postId,
+			sourceType: "post_like",
+			sourceId: "developer_notification_detail_source",
+		});
+
+		const response = await app.request(`/v1/notifications/${notificationId}`, {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+		const body = (await response.json()) as {
+			notification: {
+				id: string;
+				type: string;
+				sourceType: string;
+				sourceId: string;
+				readAt: string | null;
+				actionUrl: string | null;
+				actor: { id: string } | null;
+				post: { id: string } | null;
+				quotePost: { id: string } | null;
+			};
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.notification.id).toBe(notificationId);
+		expect(body.notification.type).toBe("like");
+		expect(body.notification.sourceType).toBe("post_like");
+		expect(body.notification.sourceId).toBe(
+			"developer_notification_detail_source",
+		);
+		expect(body.notification.readAt).toBeNull();
+		expect(body.notification.actionUrl).toBe(`/posts/${postId}`);
+		expect(body.notification.actor?.id).toBe(actorUserId);
+		expect(body.notification.post?.id).toBe(postId);
+		expect(body.notification.quotePost).toBeNull();
+	});
+
+	it("他ユーザー宛てのnotificationIdはBearerトークンで取得できない", async () => {
+		const token = await createDeveloperApiToken();
+		const recipientUserId = "developer_notification_detail_other_user";
+		const notificationId = "developer_notification_detail_other";
+
+		await db.insert(schema.user).values({
+			id: recipientUserId,
+			name: "Other Recipient",
+			email: "developer-notification-detail-other@example.com",
+			emailVerified: true,
+		});
+
+		await db.insert(schema.notifications).values({
+			id: notificationId,
+			recipientUserId,
+			type: "info",
+			sourceType: "system_manual",
+			sourceId: "developer_notification_detail_other_source",
+			title: "hidden",
+			body: "not your notification",
+		});
+
+		const response = await app.request(`/v1/notifications/${notificationId}`, {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+
+		expect(response.status).toBe(404);
+	});
+
 	it("通知Webhookの作成・送信・削除ができる", async () => {
 		const token = await createDeveloperApiToken();
 		const fetchSpy = vi
