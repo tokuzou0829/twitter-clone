@@ -201,6 +201,10 @@ const webhookSendSchema = z
 		}
 	});
 
+const webhookSingleSendSchema = z.object({
+	type: z.enum(NOTIFICATION_FILTER_VALUES).optional(),
+});
+
 const developerApiTokenSelection = {
 	id: schema.developerApiTokens.id,
 	name: schema.developerApiTokens.name,
@@ -346,6 +350,217 @@ const app = createHonoApp()
 			webhooks: webhookRows.map(toDeveloperNotificationWebhookSummary),
 		});
 	})
+	.post(
+		"/notification-webhooks",
+		zValidator("json", webhookCreateSchema),
+		async (c) => {
+			const { user } = await getDeveloperUserOrThrow(c);
+			const payload = c.req.valid("json");
+			const db = c.get("db");
+			const endpoint = assertSupportedWebhookEndpoint(payload.endpoint);
+
+			const [existing] = await db
+				.select({ id: schema.developerNotificationWebhooks.id })
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+						eq(schema.developerNotificationWebhooks.endpoint, endpoint),
+					),
+				)
+				.limit(1);
+
+			if (existing) {
+				throw new HTTPException(409, {
+					message: "Webhook endpoint is already registered",
+				});
+			}
+
+			const plainSecret =
+				payload.secret ?? createDeveloperNotificationWebhookSecret();
+			const now = new Date();
+			const [created] = await db
+				.insert(schema.developerNotificationWebhooks)
+				.values({
+					id: uuidv7(),
+					userId: user.id,
+					name: payload.name,
+					endpoint,
+					secret: plainSecret,
+					isActive: payload.isActive ?? true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning(developerNotificationWebhookSelection);
+
+			if (!created) {
+				throw new Error("Failed to create developer notification webhook");
+			}
+
+			return c.json(
+				{
+					webhook: toDeveloperNotificationWebhookSummary(created),
+					plainSecret,
+				},
+				201,
+			);
+		},
+	)
+	.patch(
+		"/notification-webhooks/:webhookId",
+		zValidator("param", webhookIdParamSchema),
+		zValidator("json", webhookPatchSchema),
+		async (c) => {
+			const { user } = await getDeveloperUserOrThrow(c);
+			const { webhookId } = c.req.valid("param");
+			const payload = c.req.valid("json");
+			const db = c.get("db");
+
+			const [current] = await db
+				.select(developerNotificationWebhookSelection)
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.id, webhookId),
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+					),
+				)
+				.limit(1);
+
+			if (!current) {
+				throw new HTTPException(404, { message: "Webhook not found" });
+			}
+
+			const nextEndpoint =
+				payload.endpoint === undefined
+					? current.endpoint
+					: assertSupportedWebhookEndpoint(payload.endpoint);
+
+			if (nextEndpoint !== current.endpoint) {
+				const [duplicate] = await db
+					.select({ id: schema.developerNotificationWebhooks.id })
+					.from(schema.developerNotificationWebhooks)
+					.where(
+						and(
+							eq(schema.developerNotificationWebhooks.userId, user.id),
+							eq(schema.developerNotificationWebhooks.endpoint, nextEndpoint),
+							ne(schema.developerNotificationWebhooks.id, webhookId),
+						),
+					)
+					.limit(1);
+
+				if (duplicate) {
+					throw new HTTPException(409, {
+						message: "Webhook endpoint is already registered",
+					});
+				}
+			}
+
+			const plainSecret = payload.rotateSecret
+				? createDeveloperNotificationWebhookSecret()
+				: payload.secret;
+
+			const [updated] = await db
+				.update(schema.developerNotificationWebhooks)
+				.set({
+					name: payload.name ?? current.name,
+					endpoint: nextEndpoint,
+					secret: plainSecret ?? current.secret,
+					isActive: payload.isActive ?? current.isActive,
+					updatedAt: new Date(),
+				})
+				.where(eq(schema.developerNotificationWebhooks.id, webhookId))
+				.returning(developerNotificationWebhookSelection);
+
+			if (!updated) {
+				throw new Error("Failed to update developer notification webhook");
+			}
+
+			return c.json({
+				webhook: toDeveloperNotificationWebhookSummary(updated),
+				plainSecret: plainSecret ?? null,
+			});
+		},
+	)
+	.delete(
+		"/notification-webhooks/:webhookId",
+		zValidator("param", webhookIdParamSchema),
+		async (c) => {
+			const { user } = await getDeveloperUserOrThrow(c);
+			const { webhookId } = c.req.valid("param");
+			const db = c.get("db");
+
+			const [target] = await db
+				.select({ id: schema.developerNotificationWebhooks.id })
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.id, webhookId),
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+					),
+				)
+				.limit(1);
+
+			if (!target) {
+				throw new HTTPException(404, { message: "Webhook not found" });
+			}
+
+			await db
+				.delete(schema.developerNotificationWebhooks)
+				.where(eq(schema.developerNotificationWebhooks.id, webhookId));
+
+			return c.json({ deleted: true });
+		},
+	)
+	.post(
+		"/notification-webhooks/:webhookId/send",
+		zValidator("param", webhookIdParamSchema),
+		zValidator("json", webhookSingleSendSchema),
+		async (c) => {
+			const { user } = await getDeveloperUserOrThrow(c);
+			const { webhookId } = c.req.valid("param");
+			const payload = c.req.valid("json");
+			const db = c.get("db");
+			const snapshot = await buildNotificationWebhookPayload({
+				db,
+				publicUrl: c.get("r2").publicUrl,
+				recipientUserId: user.id,
+				type: payload.type ?? "all",
+			});
+
+			const [target] = await db
+				.select({
+					id: schema.developerNotificationWebhooks.id,
+					endpoint: schema.developerNotificationWebhooks.endpoint,
+					secret: schema.developerNotificationWebhooks.secret,
+				})
+				.from(schema.developerNotificationWebhooks)
+				.where(
+					and(
+						eq(schema.developerNotificationWebhooks.id, webhookId),
+						eq(schema.developerNotificationWebhooks.userId, user.id),
+					),
+				)
+				.limit(1);
+
+			if (!target) {
+				throw new HTTPException(404, { message: "Webhook not found" });
+			}
+
+			const [result] = await deliverStoredNotificationWebhooks({
+				db,
+				webhooks: [target],
+				payload: snapshot,
+			});
+
+			return c.json({
+				deliveredAt: snapshot.generatedAt,
+				unreadCount: snapshot.unreadCount,
+				itemCount: snapshot.items.length,
+				results: result ? [result] : [],
+			});
+		},
+	)
 	.get("/v1/profile", async (c) => {
 		const user = await getDeveloperApiUserOrThrow(c);
 		const profile = await buildDeveloperProfile(c.get("db"), user.id);

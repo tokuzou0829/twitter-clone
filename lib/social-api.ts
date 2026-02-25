@@ -172,6 +172,36 @@ export type DeveloperNotificationWebhookSummary = {
 	updatedAt: string;
 };
 
+export type DeveloperNotificationWebhookCreateInput = {
+	name: string;
+	endpoint: string;
+	secret?: string;
+	isActive?: boolean;
+};
+
+export type DeveloperNotificationWebhookUpdateInput = {
+	name?: string;
+	endpoint?: string;
+	secret?: string;
+	rotateSecret?: boolean;
+	isActive?: boolean;
+};
+
+export type DeveloperNotificationWebhookSendResult = {
+	webhookId: string | null;
+	endpoint: string;
+	status: "success" | "failed";
+	statusCode: number | null;
+	error: string | null;
+};
+
+export type DeveloperNotificationWebhookSendResponse = {
+	deliveredAt: string;
+	unreadCount: number;
+	itemCount: number;
+	results: DeveloperNotificationWebhookSendResult[];
+};
+
 type PostInteractionSummary = {
 	postId: string;
 	liked: boolean;
@@ -502,6 +532,127 @@ export const fetchDeveloperNotificationWebhooks = async (): Promise<
 	}
 
 	return body.webhooks ?? [];
+};
+
+export const createDeveloperNotificationWebhook = async (
+	payload: DeveloperNotificationWebhookCreateInput,
+): Promise<{
+	webhook: DeveloperNotificationWebhookSummary;
+	plainSecret: string;
+}> => {
+	const response = await fetch("/api/developer/notification-webhooks", {
+		method: "POST",
+		credentials: "include",
+		headers: JSON_HEADERS,
+		body: JSON.stringify(payload),
+	});
+	const body = (await response.json()) as {
+		webhook?: DeveloperNotificationWebhookSummary;
+		plainSecret?: string;
+		error?: string;
+	};
+
+	if (!response.ok || !body.webhook || typeof body.plainSecret !== "string") {
+		throw new Error(body.error ?? "Failed to create notification webhook");
+	}
+
+	return {
+		webhook: body.webhook,
+		plainSecret: body.plainSecret,
+	};
+};
+
+export const updateDeveloperNotificationWebhook = async (
+	webhookId: string,
+	payload: DeveloperNotificationWebhookUpdateInput,
+): Promise<{
+	webhook: DeveloperNotificationWebhookSummary;
+	plainSecret: string | null;
+}> => {
+	const response = await fetch(
+		`/api/developer/notification-webhooks/${webhookId}`,
+		{
+			method: "PATCH",
+			credentials: "include",
+			headers: JSON_HEADERS,
+			body: JSON.stringify(payload),
+		},
+	);
+	const body = (await response.json()) as {
+		webhook?: DeveloperNotificationWebhookSummary;
+		plainSecret?: string | null;
+		error?: string;
+	};
+
+	if (!response.ok || !body.webhook) {
+		throw new Error(body.error ?? "Failed to update notification webhook");
+	}
+
+	return {
+		webhook: body.webhook,
+		plainSecret: typeof body.plainSecret === "string" ? body.plainSecret : null,
+	};
+};
+
+export const deleteDeveloperNotificationWebhook = async (
+	webhookId: string,
+): Promise<void> => {
+	const response = await fetch(
+		`/api/developer/notification-webhooks/${webhookId}`,
+		{
+			method: "DELETE",
+			credentials: "include",
+			headers: JSON_HEADERS,
+		},
+	);
+
+	if (response.ok) {
+		return;
+	}
+
+	const body = (await response.json().catch(() => null)) as {
+		error?: string;
+	} | null;
+	throw new Error(body?.error ?? "Failed to delete notification webhook");
+};
+
+export const sendDeveloperNotificationWebhook = async (
+	webhookId: string,
+	type: NotificationFilter = "all",
+): Promise<DeveloperNotificationWebhookSendResponse> => {
+	const response = await fetch(
+		`/api/developer/notification-webhooks/${webhookId}/send`,
+		{
+			method: "POST",
+			credentials: "include",
+			headers: JSON_HEADERS,
+			body: JSON.stringify({ type }),
+		},
+	);
+	const body = (await response.json()) as
+		| (DeveloperNotificationWebhookSendResponse & {
+				error?: string;
+		  })
+		| {
+				error?: string;
+		  };
+
+	if (!response.ok || !("deliveredAt" in body)) {
+		throw new Error(body.error ?? "Failed to send notification webhook");
+	}
+
+	return {
+		deliveredAt: body.deliveredAt,
+		unreadCount:
+			typeof body.unreadCount === "number" && Number.isFinite(body.unreadCount)
+				? body.unreadCount
+				: 0,
+		itemCount:
+			typeof body.itemCount === "number" && Number.isFinite(body.itemCount)
+				? body.itemCount
+				: 0,
+		results: Array.isArray(body.results) ? body.results : [],
+	};
 };
 
 export const issueDeveloperApiToken = async (

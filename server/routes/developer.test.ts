@@ -195,6 +195,109 @@ describe("/routes/developer", () => {
 		expect(backupHook?.lastError).toBe("timeout");
 	});
 
+	it("開発者はセッション経由で通知Webhookを管理できる", async () => {
+		await createUser({ isDeveloper: true });
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response(null, { status: 204 }));
+
+		const createResponse = await app.request("/notification-webhooks", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				name: "Session Hook",
+				endpoint: "https://hooks.example.com/session",
+			}),
+		});
+		const created = (await createResponse.json()) as {
+			webhook: { id: string; name: string; isActive: boolean };
+			plainSecret: string;
+		};
+
+		const patchResponse = await app.request(
+			`/notification-webhooks/${created.webhook.id}`,
+			{
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					name: "Session Hook Updated",
+					isActive: false,
+				}),
+			},
+		);
+		const patched = (await patchResponse.json()) as {
+			webhook: { id: string; name: string; isActive: boolean };
+			plainSecret: string | null;
+		};
+
+		const sendResponse = await app.request(
+			`/notification-webhooks/${created.webhook.id}/send`,
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({}),
+			},
+		);
+		const sent = (await sendResponse.json()) as {
+			results: Array<{
+				endpoint: string;
+				status: string;
+				statusCode: number | null;
+			}>;
+		};
+
+		const listResponse = await app.request("/notification-webhooks", {
+			method: "GET",
+		});
+		const listed = (await listResponse.json()) as {
+			webhooks: Array<{
+				id: string;
+				name: string;
+				isActive: boolean;
+				lastSentAt: string | null;
+				lastStatusCode: number | null;
+			}>;
+		};
+
+		const deleteResponse = await app.request(
+			`/notification-webhooks/${created.webhook.id}`,
+			{
+				method: "DELETE",
+			},
+		);
+
+		expect(createResponse.status).toBe(201);
+		expect(created.webhook.name).toBe("Session Hook");
+		expect(created.webhook.isActive).toBe(true);
+		expect(created.plainSecret.startsWith("nmt_whsec_")).toBe(true);
+		expect(patchResponse.status).toBe(200);
+		expect(patched.webhook.name).toBe("Session Hook Updated");
+		expect(patched.webhook.isActive).toBe(false);
+		expect(patched.plainSecret).toBeNull();
+		expect(sendResponse.status).toBe(200);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(sent.results[0]?.endpoint).toBe("https://hooks.example.com/session");
+		expect(sent.results[0]?.status).toBe("success");
+		expect(sent.results[0]?.statusCode).toBe(204);
+		expect(listResponse.status).toBe(200);
+		const updatedHook = listed.webhooks.find(
+			(webhook) => webhook.id === created.webhook.id,
+		);
+		expect(updatedHook?.name).toBe("Session Hook Updated");
+		expect(updatedHook?.isActive).toBe(false);
+		expect(updatedHook?.lastSentAt).not.toBeNull();
+		expect(updatedHook?.lastStatusCode).toBe(204);
+		expect(deleteResponse.status).toBe(200);
+
+		fetchSpy.mockRestore();
+	});
+
 	it("開発者は無期限トークンを発行できる", async () => {
 		await createUser({ isDeveloper: true });
 
