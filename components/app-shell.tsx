@@ -44,6 +44,8 @@ const formatNotificationBadgeCount = (count: number) => {
 	return count > 99 ? "99+" : String(count);
 };
 
+const NOTIFICATION_UNREAD_POLLING_INTERVAL_MS = 10_000;
+
 export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 	const pathname = usePathname();
 	const { data: session, isPending } = authClient.useSession();
@@ -164,8 +166,15 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 		}
 
 		let ignore = false;
+		let isLoading = false;
 
 		const loadNotificationUnreadCount = async () => {
+			if (isLoading) {
+				return;
+			}
+
+			isLoading = true;
+
 			try {
 				const response = await fetchNotificationUnreadCount();
 				if (ignore) {
@@ -176,13 +185,20 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 				if (!ignore) {
 					setNotificationUnreadCount(0);
 				}
+			} finally {
+				isLoading = false;
 			}
 		};
 
 		void loadNotificationUnreadCount();
 
+		const intervalId = window.setInterval(() => {
+			void loadNotificationUnreadCount();
+		}, NOTIFICATION_UNREAD_POLLING_INTERVAL_MS);
+
 		return () => {
 			ignore = true;
+			window.clearInterval(intervalId);
 		};
 	}, [pathname, sessionUserId]);
 
@@ -359,7 +375,7 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 								<span className="relative inline-flex">
 									{item.icon}
 									{badgeCount > 0 ? (
-										<span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[10px] leading-4 font-bold text-white">
+										<span className="absolute -right-2 -top-1 z-10 min-w-4 rounded-full bg-rose-500 px-1.5 text-center text-[10px] leading-4 font-bold text-white">
 											{formatNotificationBadgeCount(badgeCount)}
 										</span>
 									) : null}
