@@ -394,6 +394,166 @@ describe("/routes/developer", () => {
 		expect(mocks.saveBlobFile).toHaveBeenCalledTimes(1);
 	});
 
+	it("Bearerトークンで投稿を単体取得できる", async () => {
+		const token = await createDeveloperApiToken();
+		const authorId = "developer_get_post_author";
+		const postId = "developer_get_post_id";
+
+		await db.insert(schema.user).values({
+			id: authorId,
+			name: "Developer Get Post Author",
+			email: "developer-get-post-author@example.com",
+			emailVerified: true,
+		});
+
+		await db.insert(schema.posts).values({
+			id: postId,
+			authorId,
+			content: "developer api single post",
+		});
+
+		const response = await app.request(`/v1/posts/${postId}`, {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+		const body = (await response.json()) as {
+			post: {
+				id: string;
+				content: string | null;
+				author: { id: string };
+				viewer: {
+					liked: boolean;
+					reposted: boolean;
+					followingAuthor: boolean;
+				};
+			};
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.post.id).toBe(postId);
+		expect(body.post.content).toBe("developer api single post");
+		expect(body.post.author.id).toBe(authorId);
+		expect(body.post.viewer.liked).toBe(false);
+		expect(body.post.viewer.reposted).toBe(false);
+		expect(body.post.viewer.followingAuthor).toBe(false);
+	});
+
+	it("Bearerトークンで投稿スレッドを既存互換形式で取得できる", async () => {
+		const token = await createDeveloperApiToken();
+		const authorId = "developer_get_thread_author";
+		const rootPostId = "developer_get_thread_root";
+		const parentPostId = "developer_get_thread_parent";
+		const targetPostId = "developer_get_thread_target";
+		const directReplyPostId = "developer_get_thread_direct_reply";
+		const nestedReplyPostId = "developer_get_thread_nested_reply";
+
+		await db.insert(schema.user).values({
+			id: authorId,
+			name: "Developer Thread Author",
+			email: "developer-thread-author@example.com",
+			emailVerified: true,
+		});
+
+		await db.insert(schema.posts).values([
+			{
+				id: rootPostId,
+				authorId,
+				content: "thread root",
+				createdAt: new Date("2026-01-01T00:00:00.000Z"),
+				updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+			},
+			{
+				id: parentPostId,
+				authorId,
+				content: "thread parent",
+				replyToPostId: rootPostId,
+				createdAt: new Date("2026-01-02T00:00:00.000Z"),
+				updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+			},
+			{
+				id: targetPostId,
+				authorId,
+				content: "thread target",
+				replyToPostId: parentPostId,
+				createdAt: new Date("2026-01-03T00:00:00.000Z"),
+				updatedAt: new Date("2026-01-03T00:00:00.000Z"),
+			},
+			{
+				id: directReplyPostId,
+				authorId,
+				content: "direct reply",
+				replyToPostId: targetPostId,
+				createdAt: new Date("2026-01-04T00:00:00.000Z"),
+				updatedAt: new Date("2026-01-04T00:00:00.000Z"),
+			},
+			{
+				id: nestedReplyPostId,
+				authorId,
+				content: "nested reply",
+				replyToPostId: directReplyPostId,
+				createdAt: new Date("2026-01-05T00:00:00.000Z"),
+				updatedAt: new Date("2026-01-05T00:00:00.000Z"),
+			},
+		]);
+
+		const response = await app.request(`/v1/posts/${targetPostId}/thread`, {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+		const body = (await response.json()) as {
+			post: {
+				id: string;
+				replyToPostId: string | null;
+			};
+			conversationPath: Array<{ id: string }>;
+			replies: Array<{
+				id: string;
+				replyToPostId: string | null;
+				stats: { replies: number };
+			}>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.post.id).toBe(targetPostId);
+		expect(body.post.replyToPostId).toBe(parentPostId);
+		expect(body.conversationPath.map((post) => post.id)).toEqual([
+			rootPostId,
+			parentPostId,
+		]);
+		expect(body.replies.length).toBe(1);
+		expect(body.replies[0]?.id).toBe(directReplyPostId);
+		expect(body.replies[0]?.replyToPostId).toBe(targetPostId);
+		expect(body.replies[0]?.stats.replies).toBe(1);
+	});
+
+	it("存在しない投稿のDeveloper API取得は404", async () => {
+		const token = await createDeveloperApiToken();
+
+		const singleResponse = await app.request("/v1/posts/unknown_post_id", {
+			method: "GET",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+		});
+
+		const threadResponse = await app.request(
+			"/v1/posts/unknown_post_id/thread",
+			{
+				method: "GET",
+				headers: {
+					authorization: `Bearer ${token.plainToken}`,
+				},
+			},
+		);
+
+		expect(singleResponse.status).toBe(404);
+		expect(threadResponse.status).toBe(404);
+	});
+
 	it("画像枚数制限を超えた投稿は拒否される", async () => {
 		const token = await createDeveloperApiToken();
 		const formData = new FormData();

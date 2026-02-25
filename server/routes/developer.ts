@@ -74,6 +74,8 @@ const DEVELOPER_API_POST_LIMITS = {
 	allowedImageMimeTypes: ["image/jpeg", "image/png", "image/webp"],
 } as const;
 
+const MAX_DEVELOPER_API_THREAD_REPLIES = 80;
+
 const DEVELOPER_API_ALLOWED_IMAGE_MIME_TYPE_SET = new Set<string>(
 	DEVELOPER_API_POST_LIMITS.allowedImageMimeTypes,
 );
@@ -692,6 +694,91 @@ const app = createHonoApp()
 
 		return c.json({ post }, 201);
 	})
+	.get(
+		"/v1/posts/:postId",
+		zValidator("param", postIdParamSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const { postId } = c.req.valid("param");
+			const postMap = await loadPostSummaryMap({
+				db: c.get("db"),
+				publicUrl: c.get("r2").publicUrl,
+				postIds: [postId],
+				viewerId: user.id,
+			});
+			const post = postMap.get(postId);
+
+			if (!post) {
+				throw new HTTPException(404, { message: "Post not found" });
+			}
+
+			return c.json({ post });
+		},
+	)
+	.get(
+		"/v1/posts/:postId/thread",
+		zValidator("param", postIdParamSchema),
+		async (c) => {
+			const user = await getDeveloperApiUserOrThrow(c);
+			const { postId } = c.req.valid("param");
+			const db = c.get("db");
+			const publicUrl = c.get("r2").publicUrl;
+
+			const postMap = await loadPostSummaryMap({
+				db,
+				publicUrl,
+				postIds: [postId],
+				viewerId: user.id,
+			});
+			const post = postMap.get(postId);
+
+			if (!post) {
+				throw new HTTPException(404, { message: "Post not found" });
+			}
+
+			const conversationPathIds = await loadConversationPathIds(db, postId);
+			const conversationPathMap = await loadPostSummaryMap({
+				db,
+				publicUrl,
+				postIds: conversationPathIds,
+				viewerId: user.id,
+			});
+			const conversationPath = conversationPathIds
+				.map((ancestorPostId) => conversationPathMap.get(ancestorPostId))
+				.filter(
+					(ancestor): ancestor is NonNullable<typeof ancestor> =>
+						ancestor !== undefined,
+				);
+
+			const replyRows = await db
+				.select({
+					id: schema.posts.id,
+				})
+				.from(schema.posts)
+				.where(eq(schema.posts.replyToPostId, postId))
+				.orderBy(desc(schema.posts.createdAt))
+				.limit(MAX_DEVELOPER_API_THREAD_REPLIES);
+
+			const replyIds = replyRows.map((row) => row.id);
+			const replyMap = await loadPostSummaryMap({
+				db,
+				publicUrl,
+				postIds: replyIds,
+				viewerId: user.id,
+			});
+			const replies = replyIds
+				.map((replyId) => replyMap.get(replyId))
+				.filter(
+					(reply): reply is NonNullable<typeof reply> => reply !== undefined,
+				);
+
+			return c.json({
+				post,
+				conversationPath,
+				replies,
+			});
+		},
+	)
 	.delete(
 		"/v1/posts/:postId",
 		zValidator("param", postIdParamSchema),
@@ -1457,6 +1544,36 @@ const createPostWithImages = async (params: {
 	}
 
 	return post;
+};
+
+const loadConversationPathIds = async (db: Database, postId: string) => {
+	const ancestors: string[] = [];
+	const visited = new Set<string>();
+	let cursorId: string | null = postId;
+
+	while (cursorId) {
+		if (visited.has(cursorId)) {
+			break;
+		}
+		visited.add(cursorId);
+
+		const [row] = await db
+			.select({
+				replyToPostId: schema.posts.replyToPostId,
+			})
+			.from(schema.posts)
+			.where(eq(schema.posts.id, cursorId))
+			.limit(1);
+
+		if (!row?.replyToPostId) {
+			break;
+		}
+
+		ancestors.push(row.replyToPostId);
+		cursorId = row.replyToPostId;
+	}
+
+	return ancestors.reverse();
 };
 
 const toDeveloperApiTokenSummary = (token: {

@@ -29,6 +29,39 @@ curl -X POST "https://numatter.vercel.app/api/developer/v1/posts" \
   -F "images=@./sample.png;type=image/png"
 ```
 
+## GET `/api/developer/v1/posts/:postId`
+
+Get a single post.
+
+Response:
+
+```json
+{
+  "post": {
+    "id": "...",
+    "content": "..."
+  }
+}
+```
+
+## GET `/api/developer/v1/posts/:postId/thread`
+
+Get thread data in the same shape as the existing post detail API.
+
+- `conversationPath`: ancestor posts from root to parent
+- `post`: target post
+- `replies`: direct replies only (not recursive)
+
+Response:
+
+```json
+{
+  "post": { "id": "..." },
+  "conversationPath": [],
+  "replies": []
+}
+```
+
 ## DELETE `/api/developer/v1/posts/:postId`
 
 Delete your own post.
