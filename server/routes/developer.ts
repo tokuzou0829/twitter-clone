@@ -34,6 +34,14 @@ import {
 	loadNotificationItems,
 	NOTIFICATION_FILTER_VALUES,
 } from "./shared/notifications";
+import {
+	assertPostExists,
+	createNotificationIfNeeded,
+	createPostLike,
+	createPostRepost,
+	deletePostLike,
+	deletePostRepost,
+} from "./shared/post-interactions";
 import { loadPostSummaryMap } from "./shared/social";
 
 const MAX_PROFILE_NAME_LENGTH = 50;
@@ -620,13 +628,12 @@ const app = createHonoApp()
 		const db = c.get("db");
 		const formData = await c.req.formData();
 		const payload = parseDeveloperPostFormData(formData);
-
-		if (payload.replyToPostId) {
-			await assertPostExists(db, payload.replyToPostId);
-		}
-		if (payload.quotePostId) {
-			await assertPostExists(db, payload.quotePostId);
-		}
+		const replyTargetPost = payload.replyToPostId
+			? await assertPostExists(db, payload.replyToPostId)
+			: null;
+		const quoteTargetPost = payload.quotePostId
+			? await assertPostExists(db, payload.quotePostId)
+			: null;
 
 		const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
 		const fileRepository = createFileRepository(client, db, baseUrl);
@@ -642,6 +649,31 @@ const app = createHonoApp()
 			replyToPostId: payload.replyToPostId,
 			quotePostId: payload.quotePostId,
 		});
+
+		if (replyTargetPost) {
+			await createNotificationIfNeeded(db, publicUrl, {
+				recipientUserId: replyTargetPost.authorId,
+				actorUserId: user.id,
+				type: "reply",
+				postId: replyTargetPost.id,
+				sourceType: "post_reply",
+				sourceId: post.id,
+				actionUrl: `/posts/${replyTargetPost.id}`,
+			});
+		}
+
+		if (quoteTargetPost) {
+			await createNotificationIfNeeded(db, publicUrl, {
+				recipientUserId: quoteTargetPost.authorId,
+				actorUserId: user.id,
+				type: "quote",
+				postId: quoteTargetPost.id,
+				quotePostId: post.id,
+				sourceType: "quote_post",
+				sourceId: post.id,
+				actionUrl: `/posts/${post.id}`,
+			});
+		}
 
 		return c.json({ post }, 201);
 	})
@@ -710,25 +742,13 @@ const app = createHonoApp()
 		async (c) => {
 			const user = await getDeveloperApiUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			await assertPostExists(c.get("db"), postId);
 
-			await c
-				.get("db")
-				.insert(schema.postLikes)
-				.values({
-					id: uuidv7(),
-					postId,
-					userId: user.id,
-				})
-				.onConflictDoNothing({
-					target: [schema.postLikes.postId, schema.postLikes.userId],
-				});
-
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
+			const summary = await createPostLike({
+				db: c.get("db"),
+				publicUrl: c.get("r2").publicUrl,
 				postId,
-				user.id,
-			);
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	)
@@ -739,21 +759,11 @@ const app = createHonoApp()
 			const user = await getDeveloperApiUserOrThrow(c);
 			const { postId } = c.req.valid("param");
 
-			await c
-				.get("db")
-				.delete(schema.postLikes)
-				.where(
-					and(
-						eq(schema.postLikes.postId, postId),
-						eq(schema.postLikes.userId, user.id),
-					),
-				);
-
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
+			const summary = await deletePostLike({
+				db: c.get("db"),
 				postId,
-				user.id,
-			);
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	)
@@ -763,25 +773,13 @@ const app = createHonoApp()
 		async (c) => {
 			const user = await getDeveloperApiUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			await assertPostExists(c.get("db"), postId);
 
-			await c
-				.get("db")
-				.insert(schema.postReposts)
-				.values({
-					id: uuidv7(),
-					postId,
-					userId: user.id,
-				})
-				.onConflictDoNothing({
-					target: [schema.postReposts.postId, schema.postReposts.userId],
-				});
-
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
+			const summary = await createPostRepost({
+				db: c.get("db"),
+				publicUrl: c.get("r2").publicUrl,
 				postId,
-				user.id,
-			);
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	)
@@ -792,21 +790,11 @@ const app = createHonoApp()
 			const user = await getDeveloperApiUserOrThrow(c);
 			const { postId } = c.req.valid("param");
 
-			await c
-				.get("db")
-				.delete(schema.postReposts)
-				.where(
-					and(
-						eq(schema.postReposts.postId, postId),
-						eq(schema.postReposts.userId, user.id),
-					),
-				);
-
-			const summary = await getPostInteractionSummary(
-				c.get("db"),
+			const summary = await deletePostRepost({
+				db: c.get("db"),
 				postId,
-				user.id,
-			);
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	)
@@ -1440,64 +1428,6 @@ const createPostWithImages = async (params: {
 	}
 
 	return post;
-};
-
-const assertPostExists = async (db: Database, postId: string) => {
-	const [post] = await db
-		.select({ id: schema.posts.id })
-		.from(schema.posts)
-		.where(eq(schema.posts.id, postId))
-		.limit(1);
-
-	if (!post) {
-		throw new HTTPException(404, { message: "Post not found" });
-	}
-};
-
-const getPostInteractionSummary = async (
-	db: Database,
-	postId: string,
-	viewerId: string,
-) => {
-	const [likesCountRows, repostsCountRows, likedRows, repostedRows] =
-		await Promise.all([
-			db
-				.select({ count: count() })
-				.from(schema.postLikes)
-				.where(eq(schema.postLikes.postId, postId)),
-			db
-				.select({ count: count() })
-				.from(schema.postReposts)
-				.where(eq(schema.postReposts.postId, postId)),
-			db
-				.select({ postId: schema.postLikes.postId })
-				.from(schema.postLikes)
-				.where(
-					and(
-						eq(schema.postLikes.postId, postId),
-						eq(schema.postLikes.userId, viewerId),
-					),
-				)
-				.limit(1),
-			db
-				.select({ postId: schema.postReposts.postId })
-				.from(schema.postReposts)
-				.where(
-					and(
-						eq(schema.postReposts.postId, postId),
-						eq(schema.postReposts.userId, viewerId),
-					),
-				)
-				.limit(1),
-		]);
-
-	return {
-		postId,
-		liked: likedRows.length > 0,
-		reposted: repostedRows.length > 0,
-		likes: Number(likesCountRows[0]?.count ?? 0),
-		reposts: Number(repostsCountRows[0]?.count ?? 0),
-	};
 };
 
 const toDeveloperApiTokenSummary = (token: {

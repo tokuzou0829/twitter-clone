@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -16,7 +16,14 @@ import { createFileRepository } from "@/server/infrastructure/repositories/file"
 import { getUserOrThrow } from "@/server/middleware/auth";
 import { createBlobFile } from "@/server/objects/file";
 import { createHonoApp } from "../create-app";
-import { dispatchNotificationWebhooksForRecipient } from "./shared/notification-webhooks";
+import {
+	assertPostExists,
+	createNotificationIfNeeded,
+	createPostLike,
+	createPostRepost,
+	deletePostLike,
+	deletePostRepost,
+} from "./shared/post-interactions";
 import { loadPostSummaryMap, loadTimelineItems } from "./shared/social";
 
 const timelineQuerySchema = z.object({
@@ -310,36 +317,12 @@ const app = createHonoApp()
 	.post("/:postId/likes", zValidator("param", postIdParamSchema), async (c) => {
 		const { user } = await getUserOrThrow(c);
 		const { postId } = c.req.valid("param");
-		const db = c.get("db");
-		const targetPost = await assertPostExists(db, postId);
-
-		const [savedLike] = await db
-			.insert(schema.postLikes)
-			.values({
-				id: uuidv7(),
-				postId,
-				userId: user.id,
-			})
-			.onConflictDoNothing({
-				target: [schema.postLikes.postId, schema.postLikes.userId],
-			})
-			.returning({
-				id: schema.postLikes.id,
-			});
-
-		if (savedLike) {
-			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
-				recipientUserId: targetPost.authorId,
-				actorUserId: user.id,
-				type: "like",
-				postId,
-				sourceType: "post_like",
-				sourceId: savedLike.id,
-				actionUrl: `/posts/${postId}`,
-			});
-		}
-
-		const summary = await getPostInteractionSummary(db, postId, user.id);
+		const summary = await createPostLike({
+			db: c.get("db"),
+			publicUrl: c.get("r2").publicUrl,
+			postId,
+			userId: user.id,
+		});
 		return c.json(summary);
 	})
 	.delete(
@@ -348,27 +331,11 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			const db = c.get("db");
-
-			const deletedLikes = await db
-				.delete(schema.postLikes)
-				.where(
-					and(
-						eq(schema.postLikes.postId, postId),
-						eq(schema.postLikes.userId, user.id),
-					),
-				)
-				.returning({
-					id: schema.postLikes.id,
-				});
-
-			await removeNotificationsBySource(
-				db,
-				"post_like",
-				deletedLikes.map((like) => like.id),
-			);
-
-			const summary = await getPostInteractionSummary(db, postId, user.id);
+			const summary = await deletePostLike({
+				db: c.get("db"),
+				postId,
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	)
@@ -378,36 +345,12 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			const db = c.get("db");
-			const targetPost = await assertPostExists(db, postId);
-
-			const [savedRepost] = await db
-				.insert(schema.postReposts)
-				.values({
-					id: uuidv7(),
-					postId,
-					userId: user.id,
-				})
-				.onConflictDoNothing({
-					target: [schema.postReposts.postId, schema.postReposts.userId],
-				})
-				.returning({
-					id: schema.postReposts.id,
-				});
-
-			if (savedRepost) {
-				await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
-					recipientUserId: targetPost.authorId,
-					actorUserId: user.id,
-					type: "repost",
-					postId,
-					sourceType: "post_repost",
-					sourceId: savedRepost.id,
-					actionUrl: `/posts/${postId}`,
-				});
-			}
-
-			const summary = await getPostInteractionSummary(db, postId, user.id);
+			const summary = await createPostRepost({
+				db: c.get("db"),
+				publicUrl: c.get("r2").publicUrl,
+				postId,
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	)
@@ -417,27 +360,11 @@ const app = createHonoApp()
 		async (c) => {
 			const { user } = await getUserOrThrow(c);
 			const { postId } = c.req.valid("param");
-			const db = c.get("db");
-
-			const deletedReposts = await db
-				.delete(schema.postReposts)
-				.where(
-					and(
-						eq(schema.postReposts.postId, postId),
-						eq(schema.postReposts.userId, user.id),
-					),
-				)
-				.returning({
-					id: schema.postReposts.id,
-				});
-
-			await removeNotificationsBySource(
-				db,
-				"post_repost",
-				deletedReposts.map((repost) => repost.id),
-			);
-
-			const summary = await getPostInteractionSummary(db, postId, user.id);
+			const summary = await deletePostRepost({
+				db: c.get("db"),
+				postId,
+				userId: user.id,
+			});
 			return c.json(summary);
 		},
 	);
@@ -607,109 +534,6 @@ const createPostWithImages = async (params: {
 	return post;
 };
 
-const assertPostExists = async (db: Database, postId: string) => {
-	const [post] = await db
-		.select({
-			id: schema.posts.id,
-			authorId: schema.posts.authorId,
-		})
-		.from(schema.posts)
-		.where(eq(schema.posts.id, postId))
-		.limit(1);
-
-	if (!post) {
-		throw new HTTPException(404, { message: "Post not found" });
-	}
-
-	return post;
-};
-
-const createNotificationIfNeeded = async (
-	db: Database,
-	publicUrl: string,
-	params: {
-		recipientUserId: string;
-		actorUserId: string;
-		type: "like" | "repost" | "quote" | "reply";
-		postId: string;
-		quotePostId?: string;
-		sourceType: string;
-		sourceId: string;
-		actionUrl: string;
-	},
-) => {
-	const {
-		recipientUserId,
-		actorUserId,
-		type,
-		postId,
-		quotePostId,
-		sourceType,
-		sourceId,
-		actionUrl,
-	} = params;
-
-	if (recipientUserId === actorUserId) {
-		return;
-	}
-
-	const [savedNotification] = await db
-		.insert(schema.notifications)
-		.values({
-			id: uuidv7(),
-			recipientUserId,
-			actorUserId,
-			type,
-			postId,
-			quotePostId: quotePostId ?? null,
-			sourceType,
-			sourceId,
-			actionUrl,
-			createdAt: new Date(),
-		})
-		.onConflictDoNothing({
-			target: [schema.notifications.sourceType, schema.notifications.sourceId],
-		})
-		.returning({
-			id: schema.notifications.id,
-		});
-
-	if (!savedNotification) {
-		return;
-	}
-
-	await dispatchNotificationWebhooksForRecipient({
-		db,
-		publicUrl,
-		recipientUserId,
-		trigger: {
-			notificationId: savedNotification.id,
-			type,
-			sourceType,
-			sourceId,
-		},
-	}).catch(() => undefined);
-};
-
-const removeNotificationsBySource = async (
-	db: Database,
-	sourceType: string,
-	sourceIds: string[],
-) => {
-	if (sourceIds.length === 0) {
-		return;
-	}
-
-	await db
-		.delete(schema.notifications)
-		.where(
-			and(
-				eq(schema.notifications.sourceType, sourceType),
-				inArray(schema.notifications.sourceId, sourceIds),
-			),
-		);
-};
-
 const loadConversationPathIds = async (db: Database, postId: string) => {
 	const ancestors: string[] = [];
 	const visited = new Set<string>();
@@ -738,50 +562,4 @@ const loadConversationPathIds = async (db: Database, postId: string) => {
 	}
 
 	return ancestors.reverse();
-};
-
-const getPostInteractionSummary = async (
-	db: Database,
-	postId: string,
-	viewerId: string,
-) => {
-	const [likesCountRows, repostsCountRows, likedRows, repostedRows] =
-		await Promise.all([
-			db
-				.select({ count: count() })
-				.from(schema.postLikes)
-				.where(eq(schema.postLikes.postId, postId)),
-			db
-				.select({ count: count() })
-				.from(schema.postReposts)
-				.where(eq(schema.postReposts.postId, postId)),
-			db
-				.select({ postId: schema.postLikes.postId })
-				.from(schema.postLikes)
-				.where(
-					and(
-						eq(schema.postLikes.postId, postId),
-						eq(schema.postLikes.userId, viewerId),
-					),
-				)
-				.limit(1),
-			db
-				.select({ postId: schema.postReposts.postId })
-				.from(schema.postReposts)
-				.where(
-					and(
-						eq(schema.postReposts.postId, postId),
-						eq(schema.postReposts.userId, viewerId),
-					),
-				)
-				.limit(1),
-		]);
-
-	return {
-		postId,
-		liked: likedRows.length > 0,
-		reposted: repostedRows.length > 0,
-		likes: Number(likesCountRows[0]?.count ?? 0),
-		reposts: Number(repostsCountRows[0]?.count ?? 0),
-	};
 };

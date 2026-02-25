@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 import type { BlobFile } from "@/server/objects/file";
@@ -416,7 +416,7 @@ describe("/routes/developer", () => {
 		expect(response.status).toBe(400);
 	});
 
-	it("いいねとリポストをBearerトークンで切り替えできる", async () => {
+	it("いいねとリポストをBearerトークンで切り替えでき、通知も同期される", async () => {
 		const token = await createDeveloperApiToken();
 
 		await db.insert(schema.user).values({
@@ -444,6 +444,26 @@ describe("/routes/developer", () => {
 			liked: boolean;
 			likes: number;
 		};
+		const [savedLikeNotification] = await db
+			.select({
+				id: schema.notifications.id,
+				type: schema.notifications.type,
+				sourceType: schema.notifications.sourceType,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(
+						schema.notifications.recipientUserId,
+						"developer_route_target_author",
+					),
+					eq(schema.notifications.actorUserId, "test_user_id"),
+					eq(schema.notifications.type, "like"),
+					eq(schema.notifications.sourceType, "post_like"),
+					eq(schema.notifications.postId, "developer_route_target_post"),
+				),
+			)
+			.limit(1);
 
 		const unlikeResponse = await app.request(
 			"/v1/posts/developer_route_target_post/likes",
@@ -458,6 +478,11 @@ describe("/routes/developer", () => {
 			liked: boolean;
 			likes: number;
 		};
+		const [remainingLikeNotification] = await db
+			.select({ id: schema.notifications.id })
+			.from(schema.notifications)
+			.where(eq(schema.notifications.id, savedLikeNotification?.id ?? ""))
+			.limit(1);
 
 		const repostResponse = await app.request(
 			"/v1/posts/developer_route_target_post/reposts",
@@ -472,6 +497,26 @@ describe("/routes/developer", () => {
 			reposted: boolean;
 			reposts: number;
 		};
+		const [savedRepostNotification] = await db
+			.select({
+				id: schema.notifications.id,
+				type: schema.notifications.type,
+				sourceType: schema.notifications.sourceType,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(
+						schema.notifications.recipientUserId,
+						"developer_route_target_author",
+					),
+					eq(schema.notifications.actorUserId, "test_user_id"),
+					eq(schema.notifications.type, "repost"),
+					eq(schema.notifications.sourceType, "post_repost"),
+					eq(schema.notifications.postId, "developer_route_target_post"),
+				),
+			)
+			.limit(1);
 
 		const unrepostResponse = await app.request(
 			"/v1/posts/developer_route_target_post/reposts",
@@ -486,20 +531,152 @@ describe("/routes/developer", () => {
 			reposted: boolean;
 			reposts: number;
 		};
+		const [remainingRepostNotification] = await db
+			.select({ id: schema.notifications.id })
+			.from(schema.notifications)
+			.where(eq(schema.notifications.id, savedRepostNotification?.id ?? ""))
+			.limit(1);
 
 		expect(likeResponse.status).toBe(200);
 		expect(liked.liked).toBe(true);
 		expect(liked.likes).toBe(1);
+		expect(savedLikeNotification?.type).toBe("like");
+		expect(savedLikeNotification?.sourceType).toBe("post_like");
 		expect(unlikeResponse.status).toBe(200);
 		expect(unliked.liked).toBe(false);
 		expect(unliked.likes).toBe(0);
+		expect(remainingLikeNotification).toBeUndefined();
 
 		expect(repostResponse.status).toBe(200);
 		expect(reposted.reposted).toBe(true);
 		expect(reposted.reposts).toBe(1);
+		expect(savedRepostNotification?.type).toBe("repost");
+		expect(savedRepostNotification?.sourceType).toBe("post_repost");
 		expect(unrepostResponse.status).toBe(200);
 		expect(unreposted.reposted).toBe(false);
 		expect(unreposted.reposts).toBe(0);
+		expect(remainingRepostNotification).toBeUndefined();
+	});
+
+	it("Bearerトークンでリプライと引用投稿を作成すると通知が作成される", async () => {
+		const token = await createDeveloperApiToken();
+
+		await db.insert(schema.user).values([
+			{
+				id: "developer_reply_target_author",
+				name: "Reply Target Author",
+				email: "developer-reply-target-author@example.com",
+				emailVerified: true,
+			},
+			{
+				id: "developer_quote_target_author",
+				name: "Quote Target Author",
+				email: "developer-quote-target-author@example.com",
+				emailVerified: true,
+			},
+		]);
+		await db.insert(schema.posts).values([
+			{
+				id: "developer_reply_target_post",
+				authorId: "developer_reply_target_author",
+				content: "reply target",
+			},
+			{
+				id: "developer_quote_target_post",
+				authorId: "developer_quote_target_author",
+				content: "quote target",
+			},
+		]);
+
+		const replyFormData = new FormData();
+		replyFormData.set("content", "developer api reply");
+		replyFormData.set("replyToPostId", "developer_reply_target_post");
+
+		const replyResponse = await app.request("/v1/posts", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+			body: replyFormData,
+		});
+		const replied = (await replyResponse.json()) as {
+			post: { id: string };
+		};
+
+		const [savedReplyNotification] = await db
+			.select({
+				type: schema.notifications.type,
+				postId: schema.notifications.postId,
+				sourceType: schema.notifications.sourceType,
+				sourceId: schema.notifications.sourceId,
+				actionUrl: schema.notifications.actionUrl,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(
+						schema.notifications.recipientUserId,
+						"developer_reply_target_author",
+					),
+					eq(schema.notifications.actorUserId, "test_user_id"),
+					eq(schema.notifications.type, "reply"),
+				),
+			)
+			.limit(1);
+
+		const quoteFormData = new FormData();
+		quoteFormData.set("content", "developer api quote");
+		quoteFormData.set("quotePostId", "developer_quote_target_post");
+
+		const quoteResponse = await app.request("/v1/posts", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+			body: quoteFormData,
+		});
+		const quoted = (await quoteResponse.json()) as {
+			post: { id: string };
+		};
+
+		const [savedQuoteNotification] = await db
+			.select({
+				type: schema.notifications.type,
+				postId: schema.notifications.postId,
+				quotePostId: schema.notifications.quotePostId,
+				sourceType: schema.notifications.sourceType,
+				sourceId: schema.notifications.sourceId,
+				actionUrl: schema.notifications.actionUrl,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(
+						schema.notifications.recipientUserId,
+						"developer_quote_target_author",
+					),
+					eq(schema.notifications.actorUserId, "test_user_id"),
+					eq(schema.notifications.type, "quote"),
+				),
+			)
+			.limit(1);
+
+		expect(replyResponse.status).toBe(201);
+		expect(savedReplyNotification?.type).toBe("reply");
+		expect(savedReplyNotification?.postId).toBe("developer_reply_target_post");
+		expect(savedReplyNotification?.sourceType).toBe("post_reply");
+		expect(savedReplyNotification?.sourceId).toBe(replied.post.id);
+		expect(savedReplyNotification?.actionUrl).toBe(
+			"/posts/developer_reply_target_post",
+		);
+
+		expect(quoteResponse.status).toBe(201);
+		expect(savedQuoteNotification?.type).toBe("quote");
+		expect(savedQuoteNotification?.postId).toBe("developer_quote_target_post");
+		expect(savedQuoteNotification?.quotePostId).toBe(quoted.post.id);
+		expect(savedQuoteNotification?.sourceType).toBe("quote_post");
+		expect(savedQuoteNotification?.sourceId).toBe(quoted.post.id);
+		expect(savedQuoteNotification?.actionUrl).toBe(`/posts/${quoted.post.id}`);
 	});
 
 	it("Bearerトークンで通知一覧と未読件数を取得できる", async () => {
