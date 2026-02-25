@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import * as schema from "@/db/schema";
 import type { Database } from "@/lib/db";
+import { sanitizeUserHandleDraft } from "@/lib/user-handle";
+import { getUserOrThrow } from "@/server/middleware/auth";
 import { createHonoApp } from "../create-app";
 import { loadPostSummaryMap } from "./shared/social";
 
@@ -11,8 +13,13 @@ const searchQuerySchema = z.object({
 	q: z.string().trim().max(80).optional(),
 });
 
+const mentionSearchQuerySchema = z.object({
+	q: z.string().trim().max(80).optional(),
+});
+
 const SEARCH_POST_LIMIT = 30;
 const SEARCH_USER_LIMIT = 20;
+const SEARCH_MENTION_LIMIT = 8;
 const SEARCH_HASHTAG_SAMPLE_LIMIT = 800;
 const SEARCH_HASHTAG_LIMIT = 10;
 const HASHTAG_REGEX = /(?:^|\s)#([\p{L}\p{N}_]{1,50})/gu;
@@ -22,10 +29,19 @@ const QUERY_HASHTAG_REGEX = /#([\p{L}\p{N}_]{1,50})/gu;
 const escapeLike = (value: string): string =>
 	value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 
-const app = createHonoApp().get(
-	"/",
-	zValidator("query", searchQuerySchema),
-	async (c) => {
+const app = createHonoApp()
+	.get(
+		"/mentions",
+		zValidator("query", mentionSearchQuerySchema),
+		async (c) => {
+			await getUserOrThrow(c);
+			const { q } = c.req.valid("query");
+			const users = await loadMentionSuggestions(c.get("db"), q ?? "");
+
+			return c.json({ users });
+		},
+	)
+	.get("/", zValidator("query", searchQuerySchema), async (c) => {
 		const { q } = c.req.valid("query");
 		const query = q?.trim() ?? "";
 
@@ -65,8 +81,7 @@ const app = createHonoApp().get(
 			users,
 			hashtags,
 		});
-	},
-);
+	});
 
 export default app;
 
@@ -235,4 +250,38 @@ const extractQueryHashtags = (value: string) => {
 	}
 
 	return [...hashtags];
+};
+
+const loadMentionSuggestions = async (db: Database, query: string) => {
+	const normalizedQuery = sanitizeUserHandleDraft(query);
+	const whereClause = normalizedQuery
+		? and(
+				eq(schema.user.isBanned, false),
+				isNotNull(schema.user.handle),
+				ilike(schema.user.handle, `${escapeLike(normalizedQuery)}%`),
+			)
+		: and(eq(schema.user.isBanned, false), isNotNull(schema.user.handle));
+
+	const rows = await db
+		.select({
+			id: schema.user.id,
+			name: schema.user.name,
+			handle: schema.user.handle,
+			image: schema.user.image,
+			bio: schema.user.bio,
+			bannerImage: schema.user.bannerImage,
+		})
+		.from(schema.user)
+		.where(whereClause)
+		.orderBy(desc(schema.user.createdAt))
+		.limit(SEARCH_MENTION_LIMIT);
+
+	return rows.map((row) => ({
+		id: row.id,
+		name: row.name,
+		handle: row.handle,
+		image: row.image,
+		bio: row.bio,
+		bannerImage: row.bannerImage,
+	}));
 };

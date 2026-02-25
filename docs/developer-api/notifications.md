@@ -22,7 +22,7 @@ Get notification items.
 
 Query parameters:
 
-- `type` (optional): `all` | `follow` | `like` | `repost` | `reply` | `quote` | `info`
+- `type` (optional): `all` | `follow` | `like` | `repost` | `reply` | `quote` | `mention` | `info`
 - `markAsRead` (optional): `true` | `false`
 
 Behavior:

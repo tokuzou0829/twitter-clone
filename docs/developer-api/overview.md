@@ -25,7 +25,7 @@ Authorization: Bearer <plainToken>
 - Authentication and Token Management
 - Profile
 - Posts
-- Interactions (likes/reposts)
+- Interactions (likes/reposts/mentions)
 - Notifications
 - Notification Webhooks
 

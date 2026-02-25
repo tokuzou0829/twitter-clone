@@ -92,6 +92,13 @@
 			"when": 1771948389006,
 			"tag": "0012_chunky_junta",
 			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "7",
+			"when": 1772006189940,
+			"tag": "0013_small_white_tiger",
+			"breakpoints": true
 		}
 	]
 }

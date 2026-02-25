@@ -290,6 +290,47 @@ describe("/routes/notifications", () => {
 		expect(body.items[0]?.post?.id).toBe(targetPostId);
 	});
 
+	it("type=mentionでメンション通知を絞り込める", async () => {
+		const recipient = await createUser();
+		const actorId = "notifications_filter_mention_actor";
+		const targetPostId = "notifications_filter_mention_post";
+
+		await db.insert(schema.user).values({
+			id: actorId,
+			name: "Mention Actor",
+			email: "notifications-filter-mention-actor@example.com",
+		});
+
+		await db.insert(schema.posts).values({
+			id: targetPostId,
+			authorId: actorId,
+			content: "mention target",
+		});
+
+		await db.insert(schema.notifications).values({
+			id: "notifications_filter_mention",
+			recipientUserId: recipient.id,
+			actorUserId: actorId,
+			type: "mention",
+			postId: targetPostId,
+			sourceType: "post_mention",
+			sourceId: `notifications_filter_mention_source:${recipient.id}`,
+			actionUrl: `/posts/${targetPostId}`,
+		});
+
+		const response = await app.request("/?type=mention", {
+			method: "GET",
+		});
+		const body = (await response.json()) as {
+			items: Array<{ type: string; post: { id: string } | null }>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(body.items.length).toBe(1);
+		expect(body.items[0]?.type).toBe("mention");
+		expect(body.items[0]?.post?.id).toBe(targetPostId);
+	});
+
 	it("開発者以外はsystem通知を作成できない", async () => {
 		await createUser();
 		await db.insert(schema.user).values({

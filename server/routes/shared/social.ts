@@ -30,6 +30,12 @@ type LinkSummary = {
 	ogpNextRefreshAt: string | null;
 };
 
+type PostMentionSummary = {
+	start: number;
+	end: number;
+	user: UserSummary;
+};
+
 type QuotePostSummary = {
 	id: string;
 	content: string | null;
@@ -37,6 +43,7 @@ type QuotePostSummary = {
 	author: UserSummary;
 	images: PostImageSummary[];
 	links: LinkSummary[];
+	mentions: PostMentionSummary[];
 };
 
 type PostSummary = {
@@ -49,6 +56,7 @@ type PostSummary = {
 	author: UserSummary;
 	images: PostImageSummary[];
 	links: LinkSummary[];
+	mentions: PostMentionSummary[];
 	quotePost: QuotePostSummary | null;
 	stats: {
 		likes: number;
@@ -355,14 +363,21 @@ export const loadPostSummaryMap = async (params: {
 		return new Map<string, PostSummary>();
 	}
 
-	const [imagesByPostId, linksByPostId, quoteMap, counts, viewerState] =
-		await Promise.all([
-			loadImagesByPostId(db, publicUrl, uniquePostIds),
-			loadLinksByPostId(db, uniquePostIds),
-			loadQuotePostMap(db, publicUrl, postRows),
-			loadCounts(db, uniquePostIds),
-			loadViewerState(db, viewerId, uniquePostIds, postRows),
-		]);
+	const [
+		imagesByPostId,
+		linksByPostId,
+		mentionsByPostId,
+		quoteMap,
+		counts,
+		viewerState,
+	] = await Promise.all([
+		loadImagesByPostId(db, publicUrl, uniquePostIds),
+		loadLinksByPostId(db, uniquePostIds),
+		loadMentionsByPostId(db, uniquePostIds),
+		loadQuotePostMap(db, publicUrl, postRows),
+		loadCounts(db, uniquePostIds),
+		loadViewerState(db, viewerId, uniquePostIds, postRows),
+	]);
 
 	const postMap = new Map<string, PostSummary>();
 
@@ -378,6 +393,7 @@ export const loadPostSummaryMap = async (params: {
 			author,
 			images: imagesByPostId.get(postRow.postId) ?? [],
 			links: linksByPostId.get(postRow.postId) ?? [],
+			mentions: mentionsByPostId.get(postRow.postId) ?? [],
 			quotePost: postRow.quotePostId
 				? (quoteMap.get(postRow.quotePostId) ?? null)
 				: null,
@@ -415,26 +431,31 @@ const loadQuotePostMap = async (
 		return new Map<string, QuotePostSummary>();
 	}
 
-	const [quoteRows, quoteImagesByPostId, quoteLinksByPostId] =
-		await Promise.all([
-			db
-				.select({
-					postId: schema.posts.id,
-					content: schema.posts.content,
-					createdAt: schema.posts.createdAt,
-					authorId: schema.user.id,
-					authorName: schema.user.name,
-					authorHandle: schema.user.handle,
-					authorImage: schema.user.image,
-					authorBio: schema.user.bio,
-					authorBannerImage: schema.user.bannerImage,
-				})
-				.from(schema.posts)
-				.innerJoin(schema.user, eq(schema.posts.authorId, schema.user.id))
-				.where(inArray(schema.posts.id, quotePostIds)),
-			loadImagesByPostId(db, publicUrl, quotePostIds),
-			loadLinksByPostId(db, quotePostIds),
-		]);
+	const [
+		quoteRows,
+		quoteImagesByPostId,
+		quoteLinksByPostId,
+		quoteMentionsByPostId,
+	] = await Promise.all([
+		db
+			.select({
+				postId: schema.posts.id,
+				content: schema.posts.content,
+				createdAt: schema.posts.createdAt,
+				authorId: schema.user.id,
+				authorName: schema.user.name,
+				authorHandle: schema.user.handle,
+				authorImage: schema.user.image,
+				authorBio: schema.user.bio,
+				authorBannerImage: schema.user.bannerImage,
+			})
+			.from(schema.posts)
+			.innerJoin(schema.user, eq(schema.posts.authorId, schema.user.id))
+			.where(inArray(schema.posts.id, quotePostIds)),
+		loadImagesByPostId(db, publicUrl, quotePostIds),
+		loadLinksByPostId(db, quotePostIds),
+		loadMentionsByPostId(db, quotePostIds),
+	]);
 
 	const quoteMap = new Map<string, QuotePostSummary>();
 	for (const quoteRow of quoteRows) {
@@ -445,6 +466,7 @@ const loadQuotePostMap = async (
 			author: toUserSummary(quoteRow),
 			images: quoteImagesByPostId.get(quoteRow.postId) ?? [],
 			links: quoteLinksByPostId.get(quoteRow.postId) ?? [],
+			mentions: quoteMentionsByPostId.get(quoteRow.postId) ?? [],
 		});
 	}
 
@@ -530,6 +552,56 @@ const loadLinksByPostId = async (db: Database, postIds: string[]) => {
 	}
 
 	return linksByPostId;
+};
+
+const loadMentionsByPostId = async (db: Database, postIds: string[]) => {
+	if (postIds.length === 0) {
+		return new Map<string, PostMentionSummary[]>();
+	}
+
+	const mentionRows = await db
+		.select({
+			postId: schema.postMentions.postId,
+			start: schema.postMentions.start,
+			end: schema.postMentions.end,
+			position: schema.postMentions.position,
+			userId: schema.user.id,
+			userName: schema.user.name,
+			userHandle: schema.user.handle,
+			userImage: schema.user.image,
+			userBio: schema.user.bio,
+			userBannerImage: schema.user.bannerImage,
+		})
+		.from(schema.postMentions)
+		.innerJoin(
+			schema.user,
+			eq(schema.postMentions.mentionedUserId, schema.user.id),
+		)
+		.where(inArray(schema.postMentions.postId, postIds))
+		.orderBy(
+			asc(schema.postMentions.postId),
+			asc(schema.postMentions.position),
+		);
+
+	const mentionsByPostId = new Map<string, PostMentionSummary[]>();
+	for (const mentionRow of mentionRows) {
+		const list = mentionsByPostId.get(mentionRow.postId) ?? [];
+		list.push({
+			start: mentionRow.start,
+			end: mentionRow.end,
+			user: {
+				id: mentionRow.userId,
+				name: mentionRow.userName,
+				handle: mentionRow.userHandle,
+				image: mentionRow.userImage,
+				bio: mentionRow.userBio,
+				bannerImage: mentionRow.userBannerImage,
+			},
+		});
+		mentionsByPostId.set(mentionRow.postId, list);
+	}
+
+	return mentionsByPostId;
 };
 
 const loadCounts = async (db: Database, postIds: string[]) => {

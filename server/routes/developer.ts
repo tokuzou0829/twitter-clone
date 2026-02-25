@@ -42,6 +42,11 @@ import {
 	deletePostLike,
 	deletePostRepost,
 } from "./shared/post-interactions";
+import {
+	createPostMentionNotifications,
+	type ResolvedPostMention,
+	resolvePostMentions,
+} from "./shared/post-mentions";
 import { loadPostSummaryMap } from "./shared/social";
 
 const MAX_PROFILE_NAME_LENGTH = 50;
@@ -628,6 +633,7 @@ const app = createHonoApp()
 		const db = c.get("db");
 		const formData = await c.req.formData();
 		const payload = parseDeveloperPostFormData(formData);
+		const mentions = await resolvePostMentions(db, payload.content);
 		const replyTargetPost = payload.replyToPostId
 			? await assertPostExists(db, payload.replyToPostId)
 			: null;
@@ -646,6 +652,7 @@ const app = createHonoApp()
 			content: payload.content,
 			links: payload.links,
 			images: payload.images,
+			mentions,
 			replyToPostId: payload.replyToPostId,
 			quotePostId: payload.quotePostId,
 		});
@@ -674,6 +681,14 @@ const app = createHonoApp()
 				actionUrl: `/posts/${post.id}`,
 			});
 		}
+
+		await createPostMentionNotifications({
+			db,
+			publicUrl,
+			postId: post.id,
+			actorUserId: user.id,
+			mentions,
+		});
 
 		return c.json({ post }, 201);
 	})
@@ -1321,6 +1336,7 @@ const createPostWithImages = async (params: {
 	content: string | null;
 	links: PostLink[];
 	images: File[];
+	mentions: ResolvedPostMention[];
 	replyToPostId?: string | null;
 	quotePostId?: string | null;
 }) => {
@@ -1333,6 +1349,7 @@ const createPostWithImages = async (params: {
 		content,
 		links,
 		images,
+		mentions,
 		replyToPostId,
 		quotePostId,
 	} = params;
@@ -1383,6 +1400,18 @@ const createPostWithImages = async (params: {
 				postId,
 				linkId: savedLink.id,
 				position: link.position,
+				createdAt: new Date(),
+			});
+		}
+
+		for (const mention of mentions) {
+			await db.insert(schema.postMentions).values({
+				id: uuidv7(),
+				postId,
+				mentionedUserId: mention.mentionedUserId,
+				start: mention.start,
+				end: mention.end,
+				position: mention.position,
 				createdAt: new Date(),
 			});
 		}

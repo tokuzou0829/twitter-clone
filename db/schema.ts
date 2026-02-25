@@ -230,6 +230,31 @@ export const postLinks = pgTable(
 	],
 );
 
+export const postMentions = pgTable(
+	"post_mentions",
+	{
+		id: text("id").primaryKey().notNull(),
+		postId: text("post_id")
+			.notNull()
+			.references(() => posts.id, { onDelete: "cascade" }),
+		mentionedUserId: text("mentioned_user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		start: integer("start").notNull(),
+		end: integer("end").notNull(),
+		position: integer("position").notNull(),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+	(table) => [
+		index("post_mentions_postId_idx").on(table.postId),
+		index("post_mentions_mentionedUserId_idx").on(table.mentionedUserId),
+		uniqueIndex("post_mentions_postId_position_idx").on(
+			table.postId,
+			table.position,
+		),
+	],
+);
+
 export const postImages = pgTable(
 	"post_images",
 	{
@@ -428,6 +453,7 @@ export const userRelations = relations(user, ({ many }) => ({
 	developerApiTokens: many(developerApiTokens),
 	developerNotificationWebhooks: many(developerNotificationWebhooks),
 	posts: many(posts),
+	postMentions: many(postMentions),
 	postLikes: many(postLikes),
 	postReposts: many(postReposts),
 	following: many(follows, { relationName: "followerUser" }),
@@ -481,6 +507,7 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
 		relationName: "postQuotes",
 	}),
 	quotedBy: many(posts, { relationName: "postQuotes" }),
+	mentions: many(postMentions),
 	images: many(postImages),
 	links: many(postLinks),
 	likes: many(postLikes),
@@ -505,6 +532,17 @@ export const postLinksRelations = relations(postLinks, ({ one }) => ({
 	link: one(links, {
 		fields: [postLinks.linkId],
 		references: [links.id],
+	}),
+}));
+
+export const postMentionsRelations = relations(postMentions, ({ one }) => ({
+	post: one(posts, {
+		fields: [postMentions.postId],
+		references: [posts.id],
+	}),
+	mentionedUser: one(user, {
+		fields: [postMentions.mentionedUserId],
+		references: [user.id],
 	}),
 }));
 

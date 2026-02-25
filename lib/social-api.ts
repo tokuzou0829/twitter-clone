@@ -23,6 +23,12 @@ type PostImageSummary = {
 	position: number;
 };
 
+export type PostMentionSummary = {
+	start: number;
+	end: number;
+	user: UserSummary;
+};
+
 export type LinkSummary = {
 	id: string;
 	url: string;
@@ -43,6 +49,7 @@ type QuotePostSummary = {
 	author: UserSummary;
 	images: PostImageSummary[];
 	links: LinkSummary[];
+	mentions: PostMentionSummary[];
 };
 
 export type PostSummary = {
@@ -55,6 +62,7 @@ export type PostSummary = {
 	author: UserSummary;
 	images: PostImageSummary[];
 	links: LinkSummary[];
+	mentions: PostMentionSummary[];
 	quotePost: QuotePostSummary | null;
 	stats: {
 		likes: number;
@@ -125,6 +133,7 @@ export type NotificationFilter =
 	| "repost"
 	| "reply"
 	| "quote"
+	| "mention"
 	| "info";
 
 type NotificationType = Exclude<NotificationFilter, "all"> | "violation";
@@ -172,14 +181,14 @@ export type DeveloperNotificationWebhookSummary = {
 	updatedAt: string;
 };
 
-export type DeveloperNotificationWebhookCreateInput = {
+type DeveloperNotificationWebhookCreateInput = {
 	name: string;
 	endpoint: string;
 	secret?: string;
 	isActive?: boolean;
 };
 
-export type DeveloperNotificationWebhookUpdateInput = {
+type DeveloperNotificationWebhookUpdateInput = {
 	name?: string;
 	endpoint?: string;
 	secret?: string;
@@ -187,7 +196,7 @@ export type DeveloperNotificationWebhookUpdateInput = {
 	isActive?: boolean;
 };
 
-export type DeveloperNotificationWebhookSendResult = {
+type DeveloperNotificationWebhookSendResult = {
 	webhookId: string | null;
 	endpoint: string;
 	status: "success" | "failed";
@@ -195,7 +204,7 @@ export type DeveloperNotificationWebhookSendResult = {
 	error: string | null;
 };
 
-export type DeveloperNotificationWebhookSendResponse = {
+type DeveloperNotificationWebhookSendResponse = {
 	deliveredAt: string;
 	unreadCount: number;
 	itemCount: number;
@@ -357,6 +366,29 @@ export const searchPostsAndHashtags = async (
 		users: body.users ?? [],
 		hashtags: body.hashtags ?? [],
 	};
+};
+
+export const fetchMentionSuggestions = async (
+	query: string,
+): Promise<UserSummary[]> => {
+	const normalizedQuery = query.trim();
+	const querySuffix = normalizedQuery
+		? `?q=${encodeURIComponent(normalizedQuery)}`
+		: "";
+	const response = await fetch(`/api/search/mentions${querySuffix}`, {
+		credentials: "include",
+		cache: "no-store",
+	});
+	const body = (await response.json()) as {
+		users?: UserSummary[];
+		error?: string;
+	};
+
+	if (!response.ok) {
+		throw new Error(body.error ?? "Failed to fetch mention suggestions");
+	}
+
+	return body.users ?? [];
 };
 
 export const createPost = async (formData: FormData): Promise<PostSummary> => {

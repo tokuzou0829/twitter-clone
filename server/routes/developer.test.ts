@@ -416,6 +416,72 @@ describe("/routes/developer", () => {
 		expect(response.status).toBe(400);
 	});
 
+	it("Bearerトークン投稿のメンションはuserIdで保存され通知される", async () => {
+		const token = await createDeveloperApiToken();
+		const mentionedUserId = "developer_mention_target_user";
+		const mentionedHandle = "dev_mention";
+
+		await db.insert(schema.user).values({
+			id: mentionedUserId,
+			name: "Developer Mention Target",
+			handle: mentionedHandle,
+			email: "developer-mention-target@example.com",
+			emailVerified: true,
+		});
+
+		const formData = new FormData();
+		formData.set("content", `hello @${mentionedHandle}`);
+
+		const response = await app.request("/v1/posts", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+			body: formData,
+		});
+		const body = (await response.json()) as {
+			post: {
+				id: string;
+				mentions: Array<{ user: { id: string } }>;
+			};
+		};
+
+		const [savedMention] = await db
+			.select({
+				mentionedUserId: schema.postMentions.mentionedUserId,
+			})
+			.from(schema.postMentions)
+			.where(eq(schema.postMentions.postId, body.post.id))
+			.limit(1);
+
+		const [savedNotification] = await db
+			.select({
+				type: schema.notifications.type,
+				sourceType: schema.notifications.sourceType,
+				sourceId: schema.notifications.sourceId,
+				postId: schema.notifications.postId,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, mentionedUserId),
+					eq(schema.notifications.actorUserId, "test_user_id"),
+					eq(schema.notifications.type, "mention"),
+				),
+			)
+			.limit(1);
+
+		expect(response.status).toBe(201);
+		expect(savedMention?.mentionedUserId).toBe(mentionedUserId);
+		expect(body.post.mentions[0]?.user.id).toBe(mentionedUserId);
+		expect(savedNotification?.type).toBe("mention");
+		expect(savedNotification?.postId).toBe(body.post.id);
+		expect(savedNotification?.sourceType).toBe("post_mention");
+		expect(savedNotification?.sourceId).toBe(
+			`${body.post.id}:${mentionedUserId}`,
+		);
+	});
+
 	it("いいねとリポストをBearerトークンで切り替えでき、通知も同期される", async () => {
 		const token = await createDeveloperApiToken();
 

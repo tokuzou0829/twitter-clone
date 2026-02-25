@@ -97,6 +97,73 @@ describe("/routes/posts", () => {
 		expect(relation?.linkId).toBe(body.post.links[0]?.id);
 	});
 
+	it("投稿時のメンションはuserIdで保存され通知される", async () => {
+		const author = await createUser();
+		const mentionedUserId = "mention_target_user_id";
+		const mentionedHandle = "mention_target";
+
+		await db.insert(schema.user).values({
+			id: mentionedUserId,
+			name: "Mention Target",
+			handle: mentionedHandle,
+			email: "mention-target@example.com",
+			emailVerified: true,
+		});
+
+		const formData = new FormData();
+		formData.set("content", `hello @${mentionedHandle}`);
+
+		const response = await app.request("/", {
+			method: "POST",
+			body: formData,
+		});
+		const body = (await response.json()) as {
+			post: {
+				id: string;
+				mentions: Array<{ user: { id: string }; start: number; end: number }>;
+			};
+		};
+
+		const [savedMention] = await db
+			.select({
+				mentionedUserId: schema.postMentions.mentionedUserId,
+				start: schema.postMentions.start,
+				end: schema.postMentions.end,
+			})
+			.from(schema.postMentions)
+			.where(eq(schema.postMentions.postId, body.post.id))
+			.limit(1);
+
+		const [savedNotification] = await db
+			.select({
+				type: schema.notifications.type,
+				postId: schema.notifications.postId,
+				sourceType: schema.notifications.sourceType,
+				sourceId: schema.notifications.sourceId,
+			})
+			.from(schema.notifications)
+			.where(
+				and(
+					eq(schema.notifications.recipientUserId, mentionedUserId),
+					eq(schema.notifications.actorUserId, author.id),
+					eq(schema.notifications.type, "mention"),
+				),
+			)
+			.limit(1);
+
+		expect(response.status).toBe(201);
+		expect(savedMention?.mentionedUserId).toBe(mentionedUserId);
+		expect(savedMention?.start).toBe(6);
+		expect(savedMention?.end).toBe(21);
+		expect(body.post.mentions[0]?.user.id).toBe(mentionedUserId);
+		expect(savedNotification?.type).toBe("mention");
+		expect(savedNotification?.postId).toBe(body.post.id);
+		expect(savedNotification?.sourceType).toBe("post_mention");
+		expect(savedNotification?.sourceId).toBe(
+			`${body.post.id}:${mentionedUserId}`,
+		);
+	});
+
 	it("投稿画像は4枚まで", async () => {
 		await createUser();
 		const formData = new FormData();

@@ -24,6 +24,11 @@ import {
 	deletePostLike,
 	deletePostRepost,
 } from "./shared/post-interactions";
+import {
+	createPostMentionNotifications,
+	type ResolvedPostMention,
+	resolvePostMentions,
+} from "./shared/post-mentions";
 import { loadPostSummaryMap, loadTimelineItems } from "./shared/social";
 
 const timelineQuerySchema = z.object({
@@ -115,13 +120,15 @@ const app = createHonoApp()
 	})
 	.post("/", async (c) => {
 		const { user } = await getUserOrThrow(c);
+		const db = c.get("db");
 		const formData = await c.req.formData();
 		const payload = parsePostFormData(formData, { allowEmpty: false });
+		const mentions = await resolvePostMentions(db, payload.content);
 
 		const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-		const fileRepository = createFileRepository(client, c.get("db"), baseUrl);
+		const fileRepository = createFileRepository(client, db, baseUrl);
 		const post = await createPostWithImages({
-			db: c.get("db"),
+			db,
 			fileRepository,
 			bucketName,
 			publicUrl,
@@ -129,6 +136,15 @@ const app = createHonoApp()
 			content: payload.content,
 			links: payload.links,
 			images: payload.images,
+			mentions,
+		});
+
+		await createPostMentionNotifications({
+			db,
+			publicUrl,
+			postId: post.id,
+			actorUserId: user.id,
+			mentions,
 		});
 
 		return c.json({ post }, 201);
@@ -144,6 +160,7 @@ const app = createHonoApp()
 
 			const formData = await c.req.formData();
 			const payload = parsePostFormData(formData, { allowEmpty: false });
+			const mentions = await resolvePostMentions(db, payload.content);
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
 			const fileRepository = createFileRepository(client, db, baseUrl);
@@ -156,6 +173,7 @@ const app = createHonoApp()
 				content: payload.content,
 				links: payload.links,
 				images: payload.images,
+				mentions,
 				replyToPostId: postId,
 			});
 
@@ -167,6 +185,14 @@ const app = createHonoApp()
 				sourceType: "post_reply",
 				sourceId: post.id,
 				actionUrl: `/posts/${postId}`,
+			});
+
+			await createPostMentionNotifications({
+				db,
+				publicUrl,
+				postId: post.id,
+				actorUserId: user.id,
+				mentions,
 			});
 
 			return c.json({ post }, 201);
@@ -183,6 +209,7 @@ const app = createHonoApp()
 
 			const formData = await c.req.formData();
 			const payload = parsePostFormData(formData, { allowEmpty: true });
+			const mentions = await resolvePostMentions(db, payload.content);
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
 			const fileRepository = createFileRepository(client, db, baseUrl);
@@ -195,6 +222,7 @@ const app = createHonoApp()
 				content: payload.content,
 				links: payload.links,
 				images: payload.images,
+				mentions,
 				quotePostId: postId,
 			});
 
@@ -207,6 +235,14 @@ const app = createHonoApp()
 				sourceType: "quote_post",
 				sourceId: post.id,
 				actionUrl: `/posts/${post.id}`,
+			});
+
+			await createPostMentionNotifications({
+				db,
+				publicUrl,
+				postId: post.id,
+				actorUserId: user.id,
+				mentions,
 			});
 
 			return c.json({ post }, 201);
@@ -426,6 +462,7 @@ const createPostWithImages = async (params: {
 	content: string | null;
 	links: PostLink[];
 	images: File[];
+	mentions: ResolvedPostMention[];
 	replyToPostId?: string;
 	quotePostId?: string;
 }) => {
@@ -438,6 +475,7 @@ const createPostWithImages = async (params: {
 		content,
 		links,
 		images,
+		mentions,
 		replyToPostId,
 		quotePostId,
 	} = params;
@@ -487,6 +525,18 @@ const createPostWithImages = async (params: {
 				postId,
 				linkId: savedLink.id,
 				position: link.position,
+				createdAt: new Date(),
+			});
+		}
+
+		for (const mention of mentions) {
+			await db.insert(schema.postMentions).values({
+				id: uuidv7(),
+				postId,
+				mentionedUserId: mention.mentionedUserId,
+				start: mention.start,
+				end: mention.end,
+				position: mention.position,
 				createdAt: new Date(),
 			});
 		}

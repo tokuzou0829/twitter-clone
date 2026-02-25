@@ -1,6 +1,7 @@
 "use client";
 
 import {
+	AtSign,
 	CircleAlert,
 	Heart,
 	Info,
@@ -28,6 +29,7 @@ const NOTIFICATION_FILTERS: Array<{ id: NotificationFilter; label: string }> = [
 	{ id: "repost", label: "リポスト" },
 	{ id: "reply", label: "リプライ" },
 	{ id: "quote", label: "引用" },
+	{ id: "mention", label: "メンション" },
 	{ id: "info", label: "INFO" },
 ];
 
@@ -338,6 +340,13 @@ function getNotificationIcon(type: NotificationItem["type"]) {
 		};
 	}
 
+	if (type === "mention") {
+		return {
+			node: <AtSign className="h-7 w-7" />,
+			textClassName: "text-violet-600",
+		};
+	}
+
 	if (type === "violation") {
 		return {
 			node: <CircleAlert className="h-7 w-7" />,
@@ -372,6 +381,10 @@ function createNotificationSummary(item: NotificationItem): ReactNode {
 
 	if (item.type === "reply") {
 		return `${actorText}があなたの投稿にリプライしました`;
+	}
+
+	if (item.type === "mention") {
+		return `${actorText}があなたをメンションしました`;
 	}
 
 	return `${actorText}があなたの投稿を引用しました`;

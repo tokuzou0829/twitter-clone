@@ -28,7 +28,7 @@ export const createNotificationIfNeeded = async (
 	params: {
 		recipientUserId: string;
 		actorUserId: string;
-		type: "like" | "repost" | "quote" | "reply";
+		type: "like" | "repost" | "quote" | "reply" | "mention";
 		postId: string;
 		quotePostId?: string;
 		sourceType: string;
@@ -89,7 +89,7 @@ export const createNotificationIfNeeded = async (
 	}).catch(() => undefined);
 };
 
-export const removeNotificationsBySource = async (
+const removeNotificationsBySource = async (
 	db: Database,
 	sourceType: string,
 	sourceIds: string[],
@@ -108,7 +108,7 @@ export const removeNotificationsBySource = async (
 		);
 };
 
-export const getPostInteractionSummary = async (
+const getPostInteractionSummary = async (
 	db: Database,
 	postId: string,
 	viewerId: string,

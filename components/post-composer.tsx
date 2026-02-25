@@ -1,6 +1,16 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import {
+	type ChangeEvent,
+	type ClipboardEvent,
+	type DragEvent,
+	type FormEvent,
+	type KeyboardEvent,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useChatSubmit } from "use-chat-submit";
 
 import { authClient } from "@/lib/auth-client";
@@ -8,7 +18,8 @@ import {
 	countPostContentLength,
 	MAX_POST_CONTENT_LENGTH,
 } from "@/lib/post-content";
-import { createDisplayHandle } from "@/lib/user-handle";
+import { fetchMentionSuggestions, type UserSummary } from "@/lib/social-api";
+import { createDisplayHandle, MAX_HANDLE_LENGTH } from "@/lib/user-handle";
 
 type PostComposerProps = {
 	title: string;
@@ -20,6 +31,13 @@ type PostComposerProps = {
 };
 
 const MAX_FILES = 4;
+const MENTION_SUGGEST_DEBOUNCE_MS = 120;
+
+type MentionQueryRange = {
+	start: number;
+	end: number;
+	query: string;
+};
 
 export function PostComposer({
 	title,
@@ -34,6 +52,16 @@ export function PostComposer({
 	const [images, setImages] = useState<File[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
+	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const dragDepthRef = useRef(0);
+	const [isDraggingImages, setIsDraggingImages] = useState(false);
+	const [activeMentionQuery, setActiveMentionQuery] =
+		useState<MentionQueryRange | null>(null);
+	const [mentionSuggestions, setMentionSuggestions] = useState<UserSummary[]>(
+		[],
+	);
+	const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+	const [isMentionLoading, setIsMentionLoading] = useState(false);
 
 	const frameClassName = useMemo(() => {
 		return variant === "home"
@@ -55,6 +83,141 @@ export function PostComposer({
 				userId: session.user.id,
 			})
 		: null;
+	const shouldShowMentionSuggestions =
+		activeMentionQuery !== null &&
+		(isMentionLoading || mentionSuggestions.length > 0);
+
+	const appendImages = (nextFiles: File[]) => {
+		if (nextFiles.length === 0) {
+			return;
+		}
+
+		setImages((current) => mergeComposerImages(current, nextFiles));
+	};
+
+	const updateMentionQueryFromSelection = (
+		nextContent: string,
+		selectionStart: number | null,
+	) => {
+		const nextRange =
+			typeof selectionStart === "number"
+				? findMentionQueryRange(nextContent, selectionStart)
+				: null;
+		setActiveMentionQuery(nextRange);
+
+		if (!nextRange) {
+			setMentionSuggestions([]);
+			setActiveMentionIndex(0);
+		}
+	};
+
+	const insertMentionSuggestion = (user: UserSummary) => {
+		if (!activeMentionQuery || !user.handle) {
+			return;
+		}
+
+		const beforeMention = content.slice(0, activeMentionQuery.start);
+		const afterMention = content.slice(activeMentionQuery.end);
+		const suffix =
+			afterMention.length === 0 ||
+			afterMention.startsWith(" ") ||
+			afterMention.startsWith("\n")
+				? ""
+				: " ";
+		const mentionText = `@${user.handle}${suffix}`;
+		const nextContent = `${beforeMention}${mentionText}${afterMention}`;
+		const nextCursor = beforeMention.length + mentionText.length;
+
+		setContent(nextContent);
+		setActiveMentionQuery(null);
+		setMentionSuggestions([]);
+		setActiveMentionIndex(0);
+
+		requestAnimationFrame(() => {
+			if (!textareaRef.current) {
+				return;
+			}
+
+			textareaRef.current.focus();
+			textareaRef.current.setSelectionRange(nextCursor, nextCursor);
+		});
+	};
+
+	useEffect(() => {
+		if (!session?.user?.id || !activeMentionQuery) {
+			setIsMentionLoading(false);
+			return;
+		}
+
+		let ignore = false;
+		setIsMentionLoading(true);
+
+		const timer = window.setTimeout(() => {
+			void fetchMentionSuggestions(activeMentionQuery.query)
+				.then((users) => {
+					if (ignore) {
+						return;
+					}
+
+					setMentionSuggestions(users);
+					setActiveMentionIndex(0);
+				})
+				.catch(() => {
+					if (ignore) {
+						return;
+					}
+
+					setMentionSuggestions([]);
+				})
+				.finally(() => {
+					if (!ignore) {
+						setIsMentionLoading(false);
+					}
+				});
+		}, MENTION_SUGGEST_DEBOUNCE_MS);
+
+		return () => {
+			ignore = true;
+			window.clearTimeout(timer);
+		};
+	}, [activeMentionQuery, session?.user?.id]);
+
+	const handleMentionKeyDownCapture = (
+		event: KeyboardEvent<HTMLTextAreaElement>,
+	) => {
+		if (!activeMentionQuery || mentionSuggestions.length === 0) {
+			return;
+		}
+
+		if (event.key === "ArrowDown") {
+			event.preventDefault();
+			setActiveMentionIndex((current) => {
+				return current + 1 >= mentionSuggestions.length ? 0 : current + 1;
+			});
+			return;
+		}
+
+		if (event.key === "ArrowUp") {
+			event.preventDefault();
+			setActiveMentionIndex((current) => {
+				return current - 1 < 0 ? mentionSuggestions.length - 1 : current - 1;
+			});
+			return;
+		}
+
+		if (event.key === "Enter" || event.key === "Tab") {
+			event.preventDefault();
+			insertMentionSuggestion(mentionSuggestions[activeMentionIndex]);
+			return;
+		}
+
+		if (event.key === "Escape") {
+			event.preventDefault();
+			setActiveMentionQuery(null);
+			setMentionSuggestions([]);
+			setActiveMentionIndex(0);
+		}
+	};
 
 	const submitPost = async (nextContent = content) => {
 		const nextCountedLength = countPostContentLength(nextContent);
@@ -81,6 +244,9 @@ export function PostComposer({
 			await onSubmit(formData);
 			setContent("");
 			setImages([]);
+			setActiveMentionQuery(null);
+			setMentionSuggestions([]);
+			setActiveMentionIndex(0);
 		} catch (submitError) {
 			if (submitError instanceof Error) {
 				setError(submitError.message);
@@ -105,10 +271,88 @@ export function PostComposer({
 		void submitPost();
 	};
 
+	const handleContentChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+		const nextValue = event.target.value;
+		setContent(nextValue);
+		updateMentionQueryFromSelection(nextValue, event.target.selectionStart);
+	};
+
+	const handleTextareaSelect = () => {
+		if (!textareaRef.current) {
+			return;
+		}
+
+		updateMentionQueryFromSelection(
+			textareaRef.current.value,
+			textareaRef.current.selectionStart,
+		);
+	};
+
+	const handleTextareaPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+		const imageFiles = extractImageFilesFromDataTransfer(event.clipboardData);
+		if (imageFiles.length === 0) {
+			return;
+		}
+
+		event.preventDefault();
+		appendImages(imageFiles);
+	};
+
+	const handleFormDragEnter = (event: DragEvent<HTMLFormElement>) => {
+		if (!hasImageFilesInTransfer(event.dataTransfer)) {
+			return;
+		}
+
+		event.preventDefault();
+		dragDepthRef.current += 1;
+		setIsDraggingImages(true);
+	};
+
+	const handleFormDragOver = (event: DragEvent<HTMLFormElement>) => {
+		if (!hasImageFilesInTransfer(event.dataTransfer)) {
+			return;
+		}
+
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "copy";
+		setIsDraggingImages(true);
+	};
+
+	const handleFormDragLeave = (event: DragEvent<HTMLFormElement>) => {
+		if (!hasImageFilesInTransfer(event.dataTransfer)) {
+			return;
+		}
+
+		event.preventDefault();
+		dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+		if (dragDepthRef.current === 0) {
+			setIsDraggingImages(false);
+		}
+	};
+
+	const handleFormDrop = (event: DragEvent<HTMLFormElement>) => {
+		dragDepthRef.current = 0;
+		setIsDraggingImages(false);
+
+		const imageFiles = extractImageFilesFromDataTransfer(event.dataTransfer);
+		if (imageFiles.length === 0) {
+			return;
+		}
+
+		event.preventDefault();
+		appendImages(imageFiles);
+	};
+
 	return (
 		<form
 			onSubmit={handleFormSubmit}
-			className={frameClassName}
+			onDragEnter={handleFormDragEnter}
+			onDragOver={handleFormDragOver}
+			onDragLeave={handleFormDragLeave}
+			onDrop={handleFormDrop}
+			className={`${frameClassName} ${
+				isDraggingImages ? "bg-sky-50/80 ring-2 ring-sky-200 ring-inset" : ""
+			}`}
 			id={variant === "home" ? "composer" : undefined}
 		>
 			<div className="flex items-start gap-3">
@@ -136,19 +380,95 @@ export function PostComposer({
 						</p>
 					) : null}
 
-					<textarea
-						{...getTextareaProps({
-							value: content,
-							onChange: (event) => setContent(event.target.value),
-							rows: variant === "home" ? 4 : 3,
-							placeholder,
-							className: `w-full resize-none rounded-2xl border px-4 py-3 text-base text-[var(--text-main)] outline-none transition ${
-								variant === "home"
-									? "border-transparent bg-transparent px-0 text-xl placeholder:text-zinc-500"
-									: "border-[var(--border-subtle)] bg-white placeholder:text-zinc-400 focus:border-sky-400"
-							}`,
-						})}
-					/>
+					<div className="relative">
+						<textarea
+							{...getTextareaProps({
+								value: content,
+								onChange: handleContentChange,
+								onSelect: handleTextareaSelect,
+								onClick: handleTextareaSelect,
+								onBlur: () => {
+									setActiveMentionQuery(null);
+									setMentionSuggestions([]);
+									setActiveMentionIndex(0);
+								},
+								onKeyDownCapture: handleMentionKeyDownCapture,
+								onPaste: handleTextareaPaste,
+								rows: variant === "home" ? 4 : 3,
+								placeholder,
+								ref: (element) => {
+									textareaRef.current = element;
+								},
+								className: `w-full resize-none rounded-2xl border px-4 py-3 text-base text-[var(--text-main)] outline-none transition ${
+									variant === "home"
+										? "border-transparent bg-transparent px-0 text-xl placeholder:text-zinc-500"
+										: "border-[var(--border-subtle)] bg-white placeholder:text-zinc-400 focus:border-sky-400"
+								}`,
+							})}
+						/>
+
+						{shouldShowMentionSuggestions ? (
+							<div className="absolute inset-x-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-white shadow-[0_10px_28px_rgba(15,20,25,0.12)]">
+								{isMentionLoading ? (
+									<p className="px-3 py-2 text-xs text-[var(--text-subtle)]">
+										候補を読み込み中...
+									</p>
+								) : (
+									<ul>
+										{mentionSuggestions.map((suggestion, index) => {
+											const isActive = index === activeMentionIndex;
+											const displayHandle = createDisplayHandle({
+												handle: suggestion.handle,
+												name: suggestion.name,
+												userId: suggestion.id,
+											});
+
+											return (
+												<li key={suggestion.id}>
+													<button
+														type="button"
+														onMouseDown={(event) => {
+															event.preventDefault();
+														}}
+														onClick={() => insertMentionSuggestion(suggestion)}
+														className={`flex w-full items-center gap-2 px-3 py-2 text-left transition ${
+															isActive ? "bg-sky-50" : "hover:bg-zinc-50"
+														}`}
+													>
+														<div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-100 text-[10px] font-bold text-zinc-500">
+															{suggestion.image ? (
+																<img
+																	src={suggestion.image}
+																	alt={suggestion.name}
+																	className="h-full w-full object-cover"
+																/>
+															) : (
+																suggestion.name.slice(0, 2).toUpperCase()
+															)}
+														</div>
+														<div className="min-w-0 flex-1">
+															<p className="truncate text-sm font-semibold text-[var(--text-main)]">
+																{suggestion.name}
+															</p>
+															<p className="truncate text-xs text-[var(--text-subtle)]">
+																{displayHandle}
+															</p>
+														</div>
+													</button>
+												</li>
+											);
+										})}
+									</ul>
+								)}
+							</div>
+						) : null}
+					</div>
+
+					{isDraggingImages ? (
+						<p className="mt-2 text-xs font-semibold text-sky-700">
+							画像をドロップして追加
+						</p>
+					) : null}
 
 					{images.length > 0 ? (
 						<div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-subtle)]">
@@ -179,24 +499,9 @@ export function PostComposer({
 									multiple
 									className="hidden"
 									onChange={(event) => {
-										const selected = Array.from(
-											event.currentTarget.files ?? [],
+										appendImages(
+											extractImageFilesFromDataTransfer(event.currentTarget),
 										);
-										setImages((current) => {
-											const merged = [...current, ...selected];
-											const unique = merged.filter((file, index, files) => {
-												return (
-													files.findIndex(
-														(candidate) =>
-															candidate.name === file.name &&
-															candidate.size === file.size &&
-															candidate.lastModified === file.lastModified,
-													) === index
-												);
-											});
-
-											return unique.slice(0, MAX_FILES);
-										});
 										event.currentTarget.value = "";
 									}}
 								/>
@@ -245,3 +550,96 @@ export function PostComposer({
 		</form>
 	);
 }
+
+const HANDLE_TOKEN_CHARACTER_REGEX = /[a-z0-9_]/iu;
+const HANDLE_QUERY_CHARACTER_REGEX = /^[a-z0-9_]*$/iu;
+
+type FileTransferSource = {
+	files: FileList | null;
+	items?: DataTransferItemList | null;
+};
+
+const findMentionQueryRange = (
+	value: string,
+	caretPosition: number,
+): MentionQueryRange | null => {
+	if (caretPosition < 0 || caretPosition > value.length) {
+		return null;
+	}
+
+	const mentionStart = value.lastIndexOf("@", caretPosition - 1);
+	if (mentionStart < 0) {
+		return null;
+	}
+
+	const previousCharacter = mentionStart > 0 ? value[mentionStart - 1] : "";
+	if (
+		previousCharacter &&
+		HANDLE_TOKEN_CHARACTER_REGEX.test(previousCharacter)
+	) {
+		return null;
+	}
+
+	const query = value.slice(mentionStart + 1, caretPosition);
+	if (!HANDLE_QUERY_CHARACTER_REGEX.test(query)) {
+		return null;
+	}
+
+	if (query.length > MAX_HANDLE_LENGTH) {
+		return null;
+	}
+
+	return {
+		start: mentionStart,
+		end: caretPosition,
+		query: query.toLowerCase(),
+	};
+};
+
+const extractImageFilesFromDataTransfer = (
+	source: FileTransferSource,
+): File[] => {
+	const filesFromFileList = Array.from(source.files ?? []).filter(isImageFile);
+	const filesFromItems = source.items
+		? Array.from(source.items)
+				.map((item) => item.getAsFile())
+				.filter((file): file is File => file !== null)
+				.filter(isImageFile)
+		: [];
+
+	return dedupeImageFiles([...filesFromFileList, ...filesFromItems]);
+};
+
+const hasImageFilesInTransfer = (transfer: DataTransfer | null) => {
+	if (!transfer) {
+		return false;
+	}
+
+	if (!Array.from(transfer.types).includes("Files")) {
+		return false;
+	}
+
+	return extractImageFilesFromDataTransfer(transfer).length > 0;
+};
+
+const mergeComposerImages = (current: File[], next: File[]) => {
+	return dedupeImageFiles([...current, ...next]).slice(0, MAX_FILES);
+};
+
+const dedupeImageFiles = (files: File[]) => {
+	return files.filter((file, index, allFiles) => {
+		return (
+			allFiles.findIndex((candidate) => {
+				return (
+					candidate.name === file.name &&
+					candidate.size === file.size &&
+					candidate.lastModified === file.lastModified
+				);
+			}) === index
+		);
+	});
+};
+
+const isImageFile = (file: File) => {
+	return file.size > 0 && file.type.startsWith("image/");
+};

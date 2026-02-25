@@ -10,6 +10,7 @@ export const NOTIFICATION_FILTER_VALUES = [
 	"repost",
 	"reply",
 	"quote",
+	"mention",
 	"info",
 ] as const;
 
@@ -47,7 +48,7 @@ type PostSummary =
 		? TValue
 		: never;
 
-export type NotificationDetailItem = {
+type NotificationDetailItem = {
 	id: string;
 	type: NotificationType;
 	sourceType: string;
@@ -427,6 +428,7 @@ const isSupportedNotificationType = (
 		"repost",
 		"reply",
 		"quote",
+		"mention",
 		"info",
 		"violation",
 	].includes(value);
@@ -445,7 +447,8 @@ const createNotificationStackKey = (
 		(type === "like" ||
 			type === "repost" ||
 			type === "reply" ||
-			type === "quote") &&
+			type === "quote" ||
+			type === "mention") &&
 		postId
 	) {
 		return `${type}:${postId}`;

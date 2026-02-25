@@ -19,10 +19,10 @@ import {
 	useState,
 } from "react";
 
-import { extractPostLinks } from "@/lib/post-content";
 import type { PostSummary, UserSummary } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { LinkPreviewCard } from "./link-preview-card";
+import { renderPostContent } from "./post-content-text";
 
 type PostFeedItemProps = {
 	post: PostSummary;
@@ -60,7 +60,6 @@ const BASE_ARTICLE_PADDING_LEFT = 16;
 const THREAD_INDENT = 28;
 const AVATAR_CENTER_Y = 32;
 const NODE_DOT_SIZE = 8;
-const HASHTAG_LINK_REGEX = /#[\p{L}\p{N}_]{1,50}/gu;
 const MIN_SINGLE_IMAGE_ASPECT_RATIO = 0.75;
 const MAX_SINGLE_IMAGE_ASPECT_RATIO = 1.91;
 const DEFAULT_SINGLE_IMAGE_ASPECT_RATIO = 1;
@@ -397,7 +396,7 @@ export function PostFeedItem({
 
 					{post.content ? (
 						<p className="mt-2 whitespace-pre-wrap text-[15px] leading-6 text-[var(--text-main)] break-all">
-							{renderPostContent(post.content)}
+							{renderPostContent(post.content, post.mentions)}
 						</p>
 					) : null}
 
@@ -491,7 +490,10 @@ export function PostFeedItem({
 									</div>
 									{post.quotePost.content ? (
 										<p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-main)]">
-											{renderPostContent(post.quotePost.content)}
+											{renderPostContent(
+												post.quotePost.content,
+												post.quotePost.mentions,
+											)}
 										</p>
 									) : null}
 									<Link
@@ -715,104 +717,6 @@ function ActionButton({
 			)}
 		</button>
 	);
-}
-
-function renderPostContent(content: string) {
-	const links = extractPostLinks(content);
-	if (links.length === 0) {
-		return renderHashtagsFromSegment(content, 0, content);
-	}
-
-	const fragments: ReactNode[] = [];
-	let cursor = 0;
-
-	for (const link of links) {
-		if (cursor < link.start) {
-			fragments.push(
-				...renderHashtagsFromSegment(
-					content.slice(cursor, link.start),
-					cursor,
-					content,
-				),
-			);
-		}
-
-		const linkText = content.slice(link.start, link.end);
-		fragments.push(
-			<a
-				key={`url-${link.position}-${link.start}`}
-				href={link.normalizedUrl}
-				target="_blank"
-				rel="noopener noreferrer"
-				onClick={(event) => {
-					event.stopPropagation();
-				}}
-				data-no-post-nav="true"
-				className="text-sky-600 hover:underline break-all"
-			>
-				{linkText}
-			</a>,
-		);
-
-		cursor = link.end;
-	}
-
-	if (cursor < content.length) {
-		fragments.push(
-			...renderHashtagsFromSegment(content.slice(cursor), cursor, content),
-		);
-	}
-
-	return fragments.length > 0 ? fragments : content;
-}
-
-function renderHashtagsFromSegment(
-	segment: string,
-	segmentOffset: number,
-	fullContent: string,
-) {
-	const fragments: ReactNode[] = [];
-	let cursor = 0;
-	let hashtagIndex = 0;
-
-	for (const match of segment.matchAll(HASHTAG_LINK_REGEX)) {
-		const matchedTag = match[0];
-		const startIndex = match.index;
-		if (!matchedTag || startIndex === undefined) {
-			continue;
-		}
-
-		const globalStartIndex = segmentOffset + startIndex;
-		const previousChar =
-			globalStartIndex === 0 ? "" : fullContent[globalStartIndex - 1];
-		if (globalStartIndex !== 0 && !/\s/u.test(previousChar)) {
-			continue;
-		}
-
-		if (cursor < startIndex) {
-			fragments.push(segment.slice(cursor, startIndex));
-		}
-
-		const normalizedTag = `#${matchedTag.slice(1).toLowerCase()}`;
-		fragments.push(
-			<Link
-				key={`hashtag-${segmentOffset}-${hashtagIndex}`}
-				href={`/search?q=${encodeURIComponent(normalizedTag)}`}
-				className="text-sky-600 hover:underline break-all"
-			>
-				{matchedTag}
-			</Link>,
-		);
-
-		cursor = startIndex + matchedTag.length;
-		hashtagIndex += 1;
-	}
-
-	if (cursor < segment.length) {
-		fragments.push(segment.slice(cursor));
-	}
-
-	return fragments;
 }
 
 function formatRelativeTime(value: string) {

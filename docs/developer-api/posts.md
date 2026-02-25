@@ -17,6 +17,8 @@ Rules:
 
 - `content` or `images` is required
 - `replyToPostId` and `quotePostId` cannot be set together
+- `content` 内の `@handle` は投稿作成時に解決され、内部では user id で保存されます
+- メンション対象には `mention` 通知が作成されます
 
 Example:
 

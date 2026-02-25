@@ -7,6 +7,14 @@ import app from "./search";
 const { createUser, db } = await setup();
 
 describe("/routes/search", () => {
+	it("未ログイン時はメンション候補を取得できない", async () => {
+		const response = await app.request("/mentions?q=al", {
+			method: "GET",
+		});
+
+		expect(response.status).toBe(401);
+	});
+
 	it("投稿本文とハッシュタグを検索できる", async () => {
 		const user = await createUser();
 
@@ -154,6 +162,63 @@ describe("/routes/search", () => {
 				(u) => u.id === "user_alice" && u.handle === "alice",
 			),
 		).toBe(true);
+	});
+
+	it("ログイン時はメンション候補をハンドル前方一致で取得できる", async () => {
+		await createUser();
+		await db.insert(schema.user).values([
+			{
+				id: "mention_user_alice",
+				name: "Alice Mention",
+				handle: "alice_mention",
+				email: "mention-alice@example.com",
+				emailVerified: true,
+				isBanned: false,
+				createdAt: new Date("2026-01-01"),
+				updatedAt: new Date("2026-01-01"),
+			},
+			{
+				id: "mention_user_bob",
+				name: "Bob Mention",
+				handle: "bob_mention",
+				email: "mention-bob@example.com",
+				emailVerified: true,
+				isBanned: false,
+				createdAt: new Date("2026-01-02"),
+				updatedAt: new Date("2026-01-02"),
+			},
+			{
+				id: "mention_user_banned",
+				name: "Banned Mention",
+				handle: "alice_banned",
+				email: "mention-banned@example.com",
+				emailVerified: true,
+				isBanned: true,
+				createdAt: new Date("2026-01-03"),
+				updatedAt: new Date("2026-01-03"),
+			},
+		]);
+
+		const response = await app.request("/mentions?q=alice", {
+			method: "GET",
+		});
+		const json = (await response.json()) as {
+			users: Array<{ id: string; handle: string | null }>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(
+			json.users.some(
+				(user) =>
+					user.id === "mention_user_alice" && user.handle === "alice_mention",
+			),
+		).toBe(true);
+		expect(json.users.some((user) => user.id === "mention_user_bob")).toBe(
+			false,
+		);
+		expect(json.users.some((user) => user.id === "mention_user_banned")).toBe(
+			false,
+		);
 	});
 
 	it("BAN済みユーザーは検索結果に含まれない", async () => {
