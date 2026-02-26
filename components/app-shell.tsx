@@ -272,16 +272,14 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 					{session?.user ? (
 						<Link
 							href="/users/me"
-							className="rounded-full border border-[var(--border-subtle)] px-3 py-1 text-xs font-semibold text-[var(--text-main)] transition-transform duration-700 ease-out"
-							style={{ transform: `rotate(${topRightIconTurns * 360}deg)` }}
+							className="rounded-full border border-[var(--border-subtle)] px-3 py-1 text-xs font-semibold text-[var(--text-main)]"
 						>
 							{accountHandle}
 						</Link>
 					) : (
 						<Link
 							href="/login"
-							className="rounded-full bg-[var(--brand-primary)] px-3 py-1 text-xs font-semibold text-white transition-transform duration-700 ease-out"
-							style={{ transform: `rotate(${topRightIconTurns * 360}deg)` }}
+							className="rounded-full bg-[var(--brand-primary)] px-3 py-1 text-xs font-semibold text-white"
 						>
 							ログイン
 						</Link>
@@ -296,7 +294,12 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 							href="/"
 							className="inline-flex h-12 w-12 items-center justify-center rounded-full text-2xl font-extrabold text-sky-500 transition hover:bg-sky-50"
 						>
-							<Image src="/logo.png" alt="Numatter" width={24} height={24} />
+							<span
+								className="inline-flex transition-transform duration-700 ease-out"
+								style={{ transform: `rotate(${topRightIconTurns * 360}deg)` }}
+							>
+								<Image src="/logo.png" alt="Numatter" width={24} height={24} />
+							</span>
 						</Link>
 
 						<nav className="space-y-1">
