@@ -45,6 +45,18 @@ const formatNotificationBadgeCount = (count: number) => {
 };
 
 const NOTIFICATION_UNREAD_POLLING_INTERVAL_MS = 10_000;
+const KONAMI_CODE = [
+	"ArrowUp",
+	"ArrowUp",
+	"ArrowDown",
+	"ArrowDown",
+	"ArrowLeft",
+	"ArrowRight",
+	"ArrowLeft",
+	"ArrowRight",
+	"b",
+	"a",
+] as const;
 
 export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 	const pathname = usePathname();
@@ -54,6 +66,8 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 	const [isDiscoverLoading, setIsDiscoverLoading] = useState(true);
 	const [discoverError, setDiscoverError] = useState<string | null>(null);
 	const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+	const [konamiCodeIndex, setKonamiCodeIndex] = useState(0);
+	const [topRightIconTurns, setTopRightIconTurns] = useState(0);
 
 	const navItems: NavItem[] = session?.user
 		? [
@@ -202,6 +216,42 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 		};
 	}, [pathname, sessionUserId]);
 
+	useEffect(() => {
+		const handleKeyDown = (event: KeyboardEvent) => {
+			const target = event.target;
+			if (
+				target instanceof HTMLElement &&
+				(target.tagName === "INPUT" ||
+					target.tagName === "TEXTAREA" ||
+					target.tagName === "SELECT" ||
+					target.isContentEditable)
+			) {
+				return;
+			}
+
+			const normalizedKey =
+				event.key.length === 1 ? event.key.toLowerCase() : event.key;
+			const expectedKey = KONAMI_CODE[konamiCodeIndex];
+
+			if (normalizedKey === expectedKey) {
+				if (konamiCodeIndex === KONAMI_CODE.length - 1) {
+					setTopRightIconTurns((current) => current + 1);
+					setKonamiCodeIndex(0);
+					return;
+				}
+				setKonamiCodeIndex((current) => current + 1);
+				return;
+			}
+
+			setKonamiCodeIndex(normalizedKey === KONAMI_CODE[0] ? 1 : 0);
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => {
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [konamiCodeIndex]);
+
 	const notificationsBadgeCount =
 		session?.user && !pathname.startsWith("/notifications")
 			? notificationUnreadCount
@@ -222,14 +272,16 @@ export function AppShell({ pageTitle, children, rightColumn }: AppShellProps) {
 					{session?.user ? (
 						<Link
 							href="/users/me"
-							className="rounded-full border border-[var(--border-subtle)] px-3 py-1 text-xs font-semibold text-[var(--text-main)]"
+							className="rounded-full border border-[var(--border-subtle)] px-3 py-1 text-xs font-semibold text-[var(--text-main)] transition-transform duration-700 ease-out"
+							style={{ transform: `rotate(${topRightIconTurns * 360}deg)` }}
 						>
 							{accountHandle}
 						</Link>
 					) : (
 						<Link
 							href="/login"
-							className="rounded-full bg-[var(--brand-primary)] px-3 py-1 text-xs font-semibold text-white"
+							className="rounded-full bg-[var(--brand-primary)] px-3 py-1 text-xs font-semibold text-white transition-transform duration-700 ease-out"
+							style={{ transform: `rotate(${topRightIconTurns * 360}deg)` }}
 						>
 							ログイン
 						</Link>
