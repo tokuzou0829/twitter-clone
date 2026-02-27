@@ -14,6 +14,7 @@ import {
 	type TimelineItem,
 	toggleLike,
 	toggleRepost,
+	type UserSummary,
 } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { Modal } from "./modal";
@@ -24,6 +25,7 @@ import { PostFeedItem } from "./post-feed-item";
 type TimelineFeedProps = {
 	userId?: string;
 	sessionUserId: string | null;
+	sessionUserSummary?: UserSummary | null;
 	profileTab?: ProfileTimelineTab;
 	newPost?: PostSummary | null;
 };
@@ -31,6 +33,7 @@ type TimelineFeedProps = {
 export function TimelineFeed({
 	userId,
 	sessionUserId,
+	sessionUserSummary = null,
 	profileTab = "posts",
 	newPost = null,
 }: TimelineFeedProps) {
@@ -248,6 +251,41 @@ export function TimelineFeed({
 		try {
 			const summary = await toggleRepost(postId, isReposted);
 			updatePostInteraction(summary);
+
+			if (!userId && profileTab === "posts" && sessionUserSummary) {
+				const localRepostItemId = `local-repost:${sessionUserSummary.id}:${postId}`;
+
+				setItems((current) => {
+					if (isReposted) {
+						return current.filter((item) => item.id !== localRepostItemId);
+					}
+
+					if (current.some((item) => item.id === localRepostItemId)) {
+						return current;
+					}
+
+					const targetItem = current.find((item) => item.post.id === postId);
+					if (!targetItem) {
+						return current;
+					}
+
+					const repostItem: TimelineItem = {
+						id: localRepostItemId,
+						type: "repost",
+						createdAt: new Date().toISOString(),
+						actor: sessionUserSummary,
+						post: {
+							...targetItem.post,
+							viewer: {
+								...targetItem.post.viewer,
+								reposted: true,
+							},
+						},
+					};
+
+					return [repostItem, ...current];
+				});
+			}
 		} catch (toggleError) {
 			if (toggleError instanceof Error) {
 				setError(toggleError.message);

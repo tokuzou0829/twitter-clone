@@ -40,6 +40,18 @@ export function HomePage() {
 
 			<TimelineFeed
 				sessionUserId={session?.user.id ?? null}
+				sessionUserSummary={
+					session?.user
+						? {
+								id: session.user.id,
+								name: session.user.name,
+								handle: session.user.handle ?? null,
+								image: session.user.image ?? null,
+								bio: null,
+								bannerImage: null,
+							}
+						: null
+				}
 				newPost={latestCreatedPost}
 			/>
 		</AppShell>

@@ -265,6 +265,18 @@ export function UserProfilePage({ userId }: UserProfilePageProps) {
 			<TimelineFeed
 				userId={userId}
 				sessionUserId={session?.user.id ?? null}
+				sessionUserSummary={
+					session?.user
+						? {
+								id: session.user.id,
+								name: session.user.name,
+								handle: session.user.handle ?? null,
+								image: session.user.image ?? null,
+								bio: null,
+								bannerImage: null,
+							}
+						: null
+				}
 				profileTab={activeTab}
 			/>
 		</AppShell>
