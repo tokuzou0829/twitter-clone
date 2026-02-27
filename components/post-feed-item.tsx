@@ -22,7 +22,7 @@ import {
 import type { PostSummary, UserSummary } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { LinkPreviewCard } from "./link-preview-card";
-import { renderPostContent } from "./post-content-text";
+import { PostContent } from "./post-content-text";
 
 type PostFeedItemProps = {
 	post: PostSummary;
@@ -395,9 +395,11 @@ export function PostFeedItem({
 					) : null}
 
 					{post.content ? (
-						<p className="mt-2 whitespace-pre-wrap text-[15px] leading-6 text-[var(--text-main)] break-all">
-							{renderPostContent(post.content, post.mentions)}
-						</p>
+						<PostContent
+							content={post.content}
+							mentions={post.mentions}
+							className="mt-2 text-[15px] leading-6 text-[var(--text-main)] break-all"
+						/>
 					) : null}
 
 					{primaryLink ? <LinkPreviewCard link={primaryLink} /> : null}
@@ -489,12 +491,11 @@ export function PostFeedItem({
 										</Link>
 									</div>
 									{post.quotePost.content ? (
-										<p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-main)]">
-											{renderPostContent(
-												post.quotePost.content,
-												post.quotePost.mentions,
-											)}
-										</p>
+										<PostContent
+											content={post.quotePost.content}
+											mentions={post.quotePost.mentions}
+											className="mt-1 text-sm text-[var(--text-main)]"
+										/>
 									) : null}
 									<Link
 										href={`/posts/${post.quotePost.id}`}
