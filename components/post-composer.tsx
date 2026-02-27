@@ -23,7 +23,7 @@ import {
 import {
 	fetchMentionSuggestions,
 	type LinkSummary,
-	previewLinkCard,
+	resolveLinkPreview,
 	type UserSummary,
 } from "@/lib/social-api";
 import { createDisplayHandle, MAX_HANDLE_LENGTH } from "@/lib/user-handle";
@@ -125,7 +125,7 @@ export function PostComposer({
 		setPreviewLinkError(null);
 
 		const timer = window.setTimeout(() => {
-			void previewLinkCard(firstLinkForPreview)
+			void resolveLinkPreview(firstLinkForPreview)
 				.then((link) => {
 					if (ignore) {
 						return;
@@ -160,6 +160,12 @@ export function PostComposer({
 		}
 
 		setImages((current) => mergeComposerImages(current, nextFiles));
+	};
+
+	const removeImageAt = (targetIndex: number) => {
+		setImages((current) => {
+			return current.filter((_, index) => index !== targetIndex);
+		});
 	};
 
 	const updateMentionQueryFromSelection = (
@@ -548,7 +554,7 @@ export function PostComposer({
 								return (
 									<div
 										key={`${image.name}-${image.size}-${image.lastModified}`}
-										className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)]"
+										className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)]"
 									>
 										{previewUrl ? (
 											<img
@@ -557,6 +563,13 @@ export function PostComposer({
 												className="h-24 w-24 object-cover"
 											/>
 										) : null}
+										<button
+											type="button"
+											onClick={() => removeImageAt(index)}
+											className="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-bold text-white transition hover:bg-black/80"
+										>
+											削除
+										</button>
 									</div>
 								);
 							})}

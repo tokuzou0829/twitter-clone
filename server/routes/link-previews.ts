@@ -4,7 +4,10 @@ import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
 import * as schema from "@/db/schema";
-import { getDeveloperUserOrThrow } from "@/server/middleware/auth";
+import {
+	getDeveloperUserOrThrow,
+	getUserOrThrow,
+} from "@/server/middleware/auth";
 import { createHonoApp } from "../create-app";
 
 const OGP_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -24,6 +27,10 @@ const refreshRequestSchema = z.object({
 });
 
 const previewRequestSchema = z.object({
+	url: z.string().trim().url().max(2_048),
+});
+
+const resolveRequestSchema = z.object({
 	url: z.string().trim().url().max(2_048),
 });
 
@@ -118,6 +125,62 @@ const app = createHonoApp()
 
 		return c.json({
 			updated: toLinkSummary(updatedLink),
+		});
+	})
+	.post("/resolve", zValidator("json", resolveRequestSchema), async (c) => {
+		await getUserOrThrow(c);
+
+		const { url } = c.req.valid("json");
+		let normalizedUrl: string;
+		try {
+			normalizedUrl = normalizePreviewUrl(url);
+		} catch (error) {
+			if (error instanceof Error) {
+				throw new HTTPException(400, { message: error.message });
+			}
+			throw new HTTPException(400, { message: "Invalid URL" });
+		}
+
+		const parsedUrl = new URL(normalizedUrl);
+		let preview: {
+			title: string | null;
+			description: string | null;
+			imageUrl: string | null;
+			siteName: string | null;
+		};
+
+		try {
+			preview = await fetchOpenGraphPreview(normalizedUrl);
+		} catch {
+			return c.json({
+				link: {
+					id: `preview-${normalizedUrl}`,
+					url: normalizedUrl,
+					host: parsedUrl.host,
+					displayUrl: createDisplayUrl(parsedUrl),
+					title: null,
+					description: null,
+					imageUrl: null,
+					siteName: null,
+					ogpFetchedAt: null,
+					ogpNextRefreshAt: null,
+				},
+			});
+		}
+
+		return c.json({
+			link: {
+				id: `preview-${normalizedUrl}`,
+				url: normalizedUrl,
+				host: parsedUrl.host,
+				displayUrl: createDisplayUrl(parsedUrl),
+				title: preview.title,
+				description: preview.description,
+				imageUrl: preview.imageUrl,
+				siteName: preview.siteName,
+				ogpFetchedAt: new Date().toISOString(),
+				ogpNextRefreshAt: null,
+			},
 		});
 	})
 	.post("/preview", zValidator("json", previewRequestSchema), async (c) => {

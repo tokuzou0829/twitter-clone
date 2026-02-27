@@ -844,6 +844,26 @@ export const refreshLinkPreview = async (
 	return body.updated ?? null;
 };
 
+export const resolveLinkPreview = async (url: string): Promise<LinkSummary> => {
+	const response = await fetch("/api/link-previews/resolve", {
+		method: "POST",
+		credentials: "include",
+		headers: JSON_HEADERS,
+		body: JSON.stringify({ url }),
+	});
+
+	const body = (await response.json()) as {
+		link?: LinkSummary;
+		error?: string;
+	};
+
+	if (!response.ok || !body.link) {
+		throw new Error(body.error ?? "Failed to resolve link preview");
+	}
+
+	return body.link;
+};
+
 export const previewLinkCard = async (url: string): Promise<LinkSummary> => {
 	const response = await fetch("/api/link-previews/preview", {
 		method: "POST",
