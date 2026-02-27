@@ -14,11 +14,18 @@ const YOUTUBE_VIDEO_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/u;
 export function LinkPreviewCard({ link }: LinkPreviewCardProps) {
 	const title = link.title ?? link.displayUrl;
 	const subtitle = link.siteName ?? link.host;
-	const youtubeEmbedUrl = useMemo(
+	const youtubePreviewEmbedUrl = useMemo(
 		() => createYouTubeEmbedUrl(link.url),
 		[link.url],
 	);
 	const [isYouTubeEmbedVisible, setIsYouTubeEmbedVisible] = useState(false);
+	const youtubeEmbedUrl = useMemo(() => {
+		if (!youtubePreviewEmbedUrl) {
+			return null;
+		}
+
+		return createYouTubeEmbedUrl(link.url, { autoplay: isYouTubeEmbedVisible });
+	}, [isYouTubeEmbedVisible, link.url, youtubePreviewEmbedUrl]);
 
 	const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
 		event.stopPropagation();
@@ -149,7 +156,10 @@ export function LinkPreviewCard({ link }: LinkPreviewCardProps) {
 	);
 }
 
-const createYouTubeEmbedUrl = (urlValue: string) => {
+const createYouTubeEmbedUrl = (
+	urlValue: string,
+	options?: { autoplay?: boolean },
+) => {
 	let parsedUrl: URL;
 	try {
 		parsedUrl = new URL(urlValue);
@@ -166,6 +176,11 @@ const createYouTubeEmbedUrl = (urlValue: string) => {
 	const startTimeSeconds = extractStartTimeSeconds(parsedUrl);
 	if (startTimeSeconds) {
 		embedUrl.searchParams.set("start", String(startTimeSeconds));
+	}
+
+	if (options?.autoplay) {
+		embedUrl.searchParams.set("autoplay", "1");
+		embedUrl.searchParams.set("playsinline", "1");
 	}
 
 	return embedUrl.toString();
