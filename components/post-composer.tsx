@@ -13,12 +13,19 @@ import {
 } from "react";
 import { useChatSubmit } from "use-chat-submit";
 
+import { LinkPreviewCard } from "@/components/link-preview-card";
 import { authClient } from "@/lib/auth-client";
 import {
 	countPostContentLength,
+	extractUniquePostLinks,
 	MAX_POST_CONTENT_LENGTH,
 } from "@/lib/post-content";
-import { fetchMentionSuggestions, type UserSummary } from "@/lib/social-api";
+import {
+	fetchMentionSuggestions,
+	type LinkSummary,
+	previewLinkCard,
+	type UserSummary,
+} from "@/lib/social-api";
 import { createDisplayHandle, MAX_HANDLE_LENGTH } from "@/lib/user-handle";
 
 type PostComposerProps = {
@@ -32,6 +39,7 @@ type PostComposerProps = {
 
 const MAX_FILES = 4;
 const MENTION_SUGGEST_DEBOUNCE_MS = 120;
+const LINK_PREVIEW_DEBOUNCE_MS = 300;
 
 type MentionQueryRange = {
 	start: number;
@@ -62,6 +70,9 @@ export function PostComposer({
 	);
 	const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 	const [isMentionLoading, setIsMentionLoading] = useState(false);
+	const [previewLink, setPreviewLink] = useState<LinkSummary | null>(null);
+	const [previewLinkError, setPreviewLinkError] = useState<string | null>(null);
+	const [isLinkPreviewLoading, setIsLinkPreviewLoading] = useState(false);
 
 	const frameClassName = useMemo(() => {
 		return variant === "home"
@@ -86,6 +97,62 @@ export function PostComposer({
 	const shouldShowMentionSuggestions =
 		activeMentionQuery !== null &&
 		(isMentionLoading || mentionSuggestions.length > 0);
+	const firstLinkForPreview = useMemo(() => {
+		return extractUniquePostLinks(content)[0]?.normalizedUrl ?? null;
+	}, [content]);
+	const imagePreviewUrls = useMemo(() => {
+		return images.map((image) => URL.createObjectURL(image));
+	}, [images]);
+
+	useEffect(() => {
+		return () => {
+			for (const url of imagePreviewUrls) {
+				URL.revokeObjectURL(url);
+			}
+		};
+	}, [imagePreviewUrls]);
+
+	useEffect(() => {
+		if (!firstLinkForPreview) {
+			setPreviewLink(null);
+			setPreviewLinkError(null);
+			setIsLinkPreviewLoading(false);
+			return;
+		}
+
+		let ignore = false;
+		setIsLinkPreviewLoading(true);
+		setPreviewLinkError(null);
+
+		const timer = window.setTimeout(() => {
+			void previewLinkCard(firstLinkForPreview)
+				.then((link) => {
+					if (ignore) {
+						return;
+					}
+
+					setPreviewLink(link);
+				})
+				.catch(() => {
+					if (ignore) {
+						return;
+					}
+
+					setPreviewLink(null);
+					setPreviewLinkError("リンクプレビューを取得できませんでした");
+				})
+				.finally(() => {
+					if (!ignore) {
+						setIsLinkPreviewLoading(false);
+					}
+				});
+		}, LINK_PREVIEW_DEBOUNCE_MS);
+
+		return () => {
+			ignore = true;
+			window.clearTimeout(timer);
+		};
+	}, [firstLinkForPreview]);
 
 	const appendImages = (nextFiles: File[]) => {
 		if (nextFiles.length === 0) {
@@ -244,6 +311,9 @@ export function PostComposer({
 			await onSubmit(formData);
 			setContent("");
 			setImages([]);
+			setPreviewLink(null);
+			setPreviewLinkError(null);
+			setIsLinkPreviewLoading(false);
 			setActiveMentionQuery(null);
 			setMentionSuggestions([]);
 			setActiveMentionIndex(0);
@@ -471,16 +541,40 @@ export function PostComposer({
 					) : null}
 
 					{images.length > 0 ? (
-						<div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-subtle)]">
-							{images.map((image) => (
-								<span
-									key={`${image.name}-${image.size}-${image.lastModified}`}
-									className="rounded-full bg-[var(--surface-muted)] px-2 py-1"
-								>
-									{image.name}
-								</span>
-							))}
+						<div className="mt-2 flex flex-wrap gap-2">
+							{images.map((image, index) => {
+								const previewUrl = imagePreviewUrls[index];
+
+								return (
+									<div
+										key={`${image.name}-${image.size}-${image.lastModified}`}
+										className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)]"
+									>
+										{previewUrl ? (
+											<img
+												src={previewUrl}
+												alt={image.name}
+												className="h-24 w-24 object-cover"
+											/>
+										) : null}
+									</div>
+								);
+							})}
 						</div>
+					) : null}
+
+					{isLinkPreviewLoading ? (
+						<p className="mt-3 text-xs text-[var(--text-subtle)]">
+							リンクプレビューを取得中...
+						</p>
+					) : null}
+					{previewLink ? (
+						<div className="mt-3">
+							<LinkPreviewCard link={previewLink} />
+						</div>
+					) : null}
+					{previewLinkError && firstLinkForPreview ? (
+						<p className="mt-3 text-xs text-rose-600">{previewLinkError}</p>
 					) : null}
 
 					<div
@@ -600,6 +694,10 @@ const extractImageFilesFromDataTransfer = (
 	source: FileTransferSource,
 ): File[] => {
 	const filesFromFileList = Array.from(source.files ?? []).filter(isImageFile);
+	if (filesFromFileList.length > 0) {
+		return dedupeImageFiles(filesFromFileList);
+	}
+
 	const filesFromItems = source.items
 		? Array.from(source.items)
 				.map((item) => item.getAsFile())
@@ -607,7 +705,7 @@ const extractImageFilesFromDataTransfer = (
 				.filter(isImageFile)
 		: [];
 
-	return dedupeImageFiles([...filesFromFileList, ...filesFromItems]);
+	return dedupeImageFiles(filesFromItems);
 };
 
 const hasImageFilesInTransfer = (transfer: DataTransfer | null) => {
