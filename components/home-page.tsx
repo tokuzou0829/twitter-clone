@@ -4,13 +4,14 @@ import { useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { authClient } from "@/lib/auth-client";
-import { createPost } from "@/lib/social-api";
+import { createPost, type PostSummary } from "@/lib/social-api";
 import { PostComposer } from "./post-composer";
 import { TimelineFeed } from "./timeline-feed";
 
 export function HomePage() {
 	const { data: session, isPending } = authClient.useSession();
-	const [timelineSeed, setTimelineSeed] = useState(0);
+	const [latestCreatedPost, setLatestCreatedPost] =
+		useState<PostSummary | null>(null);
 
 	return (
 		<AppShell pageTitle="Home">
@@ -25,8 +26,8 @@ export function HomePage() {
 					submitLabel="Post"
 					variant="home"
 					onSubmit={async (formData) => {
-						await createPost(formData);
-						setTimelineSeed((current) => current + 1);
+						const createdPost = await createPost(formData);
+						setLatestCreatedPost(createdPost);
 					}}
 				/>
 			) : (
@@ -38,8 +39,8 @@ export function HomePage() {
 			)}
 
 			<TimelineFeed
-				key={`${session?.user?.id ?? "guest"}-${timelineSeed}`}
 				sessionUserId={session?.user.id ?? null}
+				newPost={latestCreatedPost}
 			/>
 		</AppShell>
 	);
