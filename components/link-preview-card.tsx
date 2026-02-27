@@ -233,7 +233,6 @@ const createYouTubeEmbedUrl = (
 
 	if (options?.autoplay) {
 		embedUrl.searchParams.set("autoplay", "1");
-		embedUrl.searchParams.set("mute", "1");
 	}
 
 	return embedUrl.toString();
