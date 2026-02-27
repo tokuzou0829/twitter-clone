@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { PostMentionSummary } from "@/lib/social-api";
 
 const HASHTAG_LINK_REGEX = /(^|\s)(#[\p{L}\p{N}_]{1,50})/gu;
-const CODE_FENCE_REGEX = /```[\s\S]*?```/g;
+const NON_LINKIFY_SEGMENT_REGEX = /```[\s\S]*?```|`[^`\n]*`/g;
 
 type PostContentProps = {
 	content: string;
@@ -21,7 +21,7 @@ export function PostContent({
 	const markdownSource = buildMarkdownSource(content, mentions);
 
 	return (
-		<div className={className} data-no-post-nav="true">
+		<div className={className}>
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm]}
 				components={{
@@ -97,9 +97,14 @@ export function PostContent({
 	);
 }
 
-function buildMarkdownSource(content: string, mentions: PostMentionSummary[]) {
+const buildMarkdownSource = (
+	content: string,
+	mentions: PostMentionSummary[],
+) => {
 	const mentionRanges = normalizeMentionRanges(content, mentions);
-	const codeFences = [...content.matchAll(CODE_FENCE_REGEX)].map((match) => ({
+	const nonLinkifySegments = [
+		...content.matchAll(NON_LINKIFY_SEGMENT_REGEX),
+	].map((match) => ({
 		start: match.index ?? 0,
 		end: (match.index ?? 0) + match[0].length,
 	}));
@@ -109,20 +114,20 @@ function buildMarkdownSource(content: string, mentions: PostMentionSummary[]) {
 	let mentionIndex = 0;
 
 	while (cursor < content.length) {
-		const fence = codeFences.find((item) => item.start === cursor);
-		if (fence) {
-			parts.push(content.slice(fence.start, fence.end));
-			cursor = fence.end;
+		const segment = nonLinkifySegments.find((item) => item.start === cursor);
+		if (segment) {
+			parts.push(content.slice(segment.start, segment.end));
+			cursor = segment.end;
 			continue;
 		}
 
-		const nextFence = codeFences.find((item) => item.start > cursor);
-		const segmentEnd = nextFence?.start ?? content.length;
-		const segment = content.slice(cursor, segmentEnd);
+		const nextSegment = nonLinkifySegments.find((item) => item.start > cursor);
+		const chunkEnd = nextSegment?.start ?? content.length;
+		const chunk = content.slice(cursor, chunkEnd);
 
 		parts.push(
 			replaceMentionsAndHashtags(
-				segment,
+				chunk,
 				cursor,
 				mentionRanges,
 				() => mentionIndex,
@@ -131,19 +136,19 @@ function buildMarkdownSource(content: string, mentions: PostMentionSummary[]) {
 				},
 			),
 		);
-		cursor = segmentEnd;
+		cursor = chunkEnd;
 	}
 
 	return parts.join("");
-}
+};
 
-function replaceMentionsAndHashtags(
+const replaceMentionsAndHashtags = (
 	segment: string,
 	segmentOffset: number,
 	mentions: PostMentionSummary[],
 	getMentionIndex: () => number,
 	setMentionIndex: (value: number) => void,
-) {
+) => {
 	let output = "";
 	let localCursor = 0;
 	let mentionIndex = getMentionIndex();
@@ -174,26 +179,27 @@ function replaceMentionsAndHashtags(
 			mentionStart,
 			mention.end - segmentOffset,
 		);
-		output += `[${mentionText}](/users/${mention.user.id})`;
+		const mentionHref = `/users/${encodeURIComponent(mention.user.id)}`;
+		output += `[${mentionText}](${mentionHref})`;
 		localCursor = mention.end - segmentOffset;
 		mentionIndex += 1;
 	}
 
 	setMentionIndex(mentionIndex);
 	return output;
-}
+};
 
-function linkifyHashtags(text: string) {
+const linkifyHashtags = (text: string) => {
 	return text.replace(HASHTAG_LINK_REGEX, (_, prefix: string, tag: string) => {
 		const normalizedTag = `#${tag.slice(1).toLowerCase()}`;
 		return `${prefix}[${tag}](/search?q=${encodeURIComponent(normalizedTag)})`;
 	});
-}
+};
 
-function normalizeMentionRanges(
+const normalizeMentionRanges = (
 	content: string,
 	mentions: PostMentionSummary[],
-) {
+) => {
 	const sortedMentions = [...mentions].sort((a, b) => {
 		if (a.start !== b.start) {
 			return a.start - b.start;
@@ -227,4 +233,4 @@ function normalizeMentionRanges(
 	}
 
 	return normalizedMentions;
-}
+};
