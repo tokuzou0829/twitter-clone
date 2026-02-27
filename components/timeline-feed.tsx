@@ -333,7 +333,7 @@ export function TimelineFeed({
 			await deletePost(postId);
 			setActiveReplyPostId((current) => (current === postId ? null : current));
 			setActiveQuotePostId((current) => (current === postId ? null : current));
-			await loadTimeline();
+			setItems((current) => current.filter((item) => item.post.id !== postId));
 		} catch (deleteError) {
 			if (deleteError instanceof Error) {
 				setError(deleteError.message);

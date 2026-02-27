@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { authClient } from "@/lib/auth-client";
@@ -35,7 +35,6 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 	const [isLoading, setIsLoading] = useState(true);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
-	const [reloadKey, setReloadKey] = useState(0);
 	const [activeReplyPostId, setActiveReplyPostId] = useState<string | null>(
 		null,
 	);
@@ -45,7 +44,6 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 
 	useEffect(() => {
 		let ignore = false;
-		const requestKey = reloadKey;
 
 		const loadDetail = async () => {
 			setIsLoading(true);
@@ -53,7 +51,7 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 			try {
 				const nextDetail = await fetchPostDetail(postId);
 				const hydratedDetail = await hydrateDetailWithLinkPreview(nextDetail);
-				if (ignore || requestKey !== reloadKey) {
+				if (ignore) {
 					return;
 				}
 				setDetail(hydratedDetail);
@@ -78,7 +76,7 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 		return () => {
 			ignore = true;
 		};
-	}, [postId, reloadKey]);
+	}, [postId]);
 
 	const visiblePosts = useMemo(() => {
 		if (!detail) {
@@ -120,6 +118,42 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 		setActiveReplyPostId(null);
 	}, [sessionUserId]);
 
+	const updatePostInDetail = useCallback(
+		(postId: string, updater: (post: PostSummary) => PostSummary) => {
+			setDetail((current) => {
+				if (!current) {
+					return current;
+				}
+
+				return {
+					...current,
+					post:
+						current.post.id === postId ? updater(current.post) : current.post,
+					conversationPath: current.conversationPath.map((post) =>
+						post.id === postId ? updater(post) : post,
+					),
+					replies: current.replies.map((post) =>
+						post.id === postId ? updater(post) : post,
+					),
+				};
+			});
+		},
+		[],
+	);
+
+	const incrementPostStat = useCallback(
+		(postId: string, statKey: "replies" | "quotes", step = 1) => {
+			updatePostInDetail(postId, (post) => ({
+				...post,
+				stats: {
+					...post.stats,
+					[statKey]: Math.max(0, post.stats[statKey] + step),
+				},
+			}));
+		},
+		[updatePostInDetail],
+	);
+
 	const toggleReplyComposer = (targetPostId: string) => {
 		if (!sessionUserId) {
 			setActionError("Please log in to reply");
@@ -141,8 +175,20 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 
 		setActionError(null);
 		try {
-			await toggleLike(post.id, post.viewer.liked);
-			setReloadKey((current) => current + 1);
+			const summary = await toggleLike(post.id, post.viewer.liked);
+			updatePostInDetail(post.id, (currentPost) => ({
+				...currentPost,
+				stats: {
+					...currentPost.stats,
+					likes: summary.likes,
+					reposts: summary.reposts,
+				},
+				viewer: {
+					...currentPost.viewer,
+					liked: summary.liked,
+					reposted: summary.reposted,
+				},
+			}));
 		} catch (toggleError) {
 			if (toggleError instanceof Error) {
 				setActionError(toggleError.message);
@@ -158,8 +204,20 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 
 		setActionError(null);
 		try {
-			await toggleRepost(post.id, post.viewer.reposted);
-			setReloadKey((current) => current + 1);
+			const summary = await toggleRepost(post.id, post.viewer.reposted);
+			updatePostInDetail(post.id, (currentPost) => ({
+				...currentPost,
+				stats: {
+					...currentPost.stats,
+					likes: summary.likes,
+					reposts: summary.reposts,
+				},
+				viewer: {
+					...currentPost.viewer,
+					liked: summary.liked,
+					reposted: summary.reposted,
+				},
+			}));
 		} catch (toggleError) {
 			if (toggleError instanceof Error) {
 				setActionError(toggleError.message);
@@ -172,10 +230,39 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 			throw new Error("Please log in to reply");
 		}
 
-		await createReply(targetPostId, formData);
+		const createdReply = await createReply(targetPostId, formData);
 		setActiveReplyPostId(null);
 		setActionError(null);
-		setReloadKey((current) => current + 1);
+		incrementPostStat(targetPostId, "replies");
+		setDetail((current) => {
+			if (!current || targetPostId !== current.post.id) {
+				return current;
+			}
+
+			if (current.replies.some((reply) => reply.id === createdReply.id)) {
+				return current;
+			}
+
+			return {
+				...current,
+				replies: [createdReply, ...current.replies],
+			};
+		});
+
+		const linkIds = collectPostLinkIds(createdReply);
+		if (linkIds.length > 0) {
+			void refreshLinkPreview(linkIds)
+				.then((updatedLink) => {
+					if (!updatedLink) {
+						return;
+					}
+
+					updatePostInDetail(createdReply.id, (post) =>
+						applyLinkSummaryToPost(post, updatedLink),
+					);
+				})
+				.catch(() => null);
+		}
 	};
 
 	const submitQuote = async (targetPostId: string, formData: FormData) => {
@@ -183,10 +270,25 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 			throw new Error("Please log in to quote repost");
 		}
 
-		await createQuote(targetPostId, formData);
+		const createdQuote = await createQuote(targetPostId, formData);
 		setActiveQuotePostId(null);
 		setActionError(null);
-		setReloadKey((current) => current + 1);
+		incrementPostStat(targetPostId, "quotes");
+
+		const linkIds = collectPostLinkIds(createdQuote);
+		if (linkIds.length > 0) {
+			void refreshLinkPreview(linkIds)
+				.then((updatedLink) => {
+					if (!updatedLink) {
+						return;
+					}
+
+					updatePostInDetail(createdQuote.id, (post) =>
+						applyLinkSummaryToPost(post, updatedLink),
+					);
+				})
+				.catch(() => null);
+		}
 	};
 
 	const handleDeletePost = async (post: PostSummary) => {
@@ -206,7 +308,23 @@ export function PostDetailPage({ postId }: PostDetailPageProps) {
 				return;
 			}
 
-			setReloadKey((current) => current + 1);
+			if (post.replyToPostId) {
+				incrementPostStat(post.replyToPostId, "replies", -1);
+			}
+
+			setDetail((current) => {
+				if (!current) {
+					return current;
+				}
+
+				return {
+					...current,
+					conversationPath: current.conversationPath.filter(
+						(item) => item.id !== post.id,
+					),
+					replies: current.replies.filter((item) => item.id !== post.id),
+				};
+			});
 		} catch (deleteError) {
 			if (deleteError instanceof Error) {
 				setActionError(deleteError.message);
@@ -461,6 +579,13 @@ const hydrateDetailWithLinkPreview = async (detail: PostDetailResponse) => {
 			applyLinkSummaryToPost(post, updatedLink),
 		),
 	};
+};
+
+const collectPostLinkIds = (post: PostSummary) => {
+	return [
+		...post.links.map((link) => link.id),
+		...(post.quotePost?.links.map((link) => link.id) ?? []),
+	];
 };
 
 const collectDetailLinkIds = (detail: PostDetailResponse) => {

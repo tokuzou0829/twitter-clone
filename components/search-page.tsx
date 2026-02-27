@@ -233,26 +233,40 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 		}));
 	};
 
-	const refreshSearchResults = async () => {
-		const normalizedQuery = activeQuery.trim();
-		if (!normalizedQuery) {
-			return;
-		}
-
-		setIsSearching(true);
-		setSearchError(null);
-		try {
-			const nextResults = await searchPostsAndHashtags(normalizedQuery);
-			setSearchResults(await hydrateSearchResultsWithLinkPreview(nextResults));
-		} catch (refreshError) {
-			if (refreshError instanceof Error) {
-				setActionError(refreshError.message);
-			} else {
-				setActionError("Failed to refresh search results");
+	const prependCreatedPost = (post: PostSummary) => {
+		setSearchResults((current) => {
+			if (current.posts.some((currentPost) => currentPost.id === post.id)) {
+				return current;
 			}
-		} finally {
-			setIsSearching(false);
-		}
+
+			return {
+				...current,
+				posts: [post, ...current.posts],
+			};
+		});
+	};
+
+	const incrementPostStat = (
+		postId: string,
+		statKey: "replies" | "quotes",
+		step = 1,
+	) => {
+		setSearchResults((current) => ({
+			...current,
+			posts: current.posts.map((post) => {
+				if (post.id !== postId) {
+					return post;
+				}
+
+				return {
+					...post,
+					stats: {
+						...post.stats,
+						[statKey]: Math.max(0, post.stats[statKey] + step),
+					},
+				};
+			}),
+		}));
 	};
 
 	const handleLike = async (postId: string, isLiked: boolean) => {
@@ -294,23 +308,63 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 			throw new Error("Please log in to reply");
 		}
 
-		await createReply(targetPostId, formData);
+		const createdReply = await createReply(targetPostId, formData);
 		setActiveReplyPostId(null);
 		setActionError(null);
-		await refreshSearchResults();
-	};
+		prependCreatedPost(createdReply);
+		incrementPostStat(targetPostId, "replies");
 
+		const linkIds = collectSearchResultLinkIds([createdReply]);
+		if (linkIds.length > 0) {
+			void refreshLinkPreview(linkIds)
+				.then((updatedLink) => {
+					if (!updatedLink) {
+						return;
+					}
+
+					setSearchResults((current) => ({
+						...current,
+						posts: current.posts.map((post) =>
+							post.id === createdReply.id
+								? applyLinkSummaryToPost(post, updatedLink)
+								: post,
+						),
+					}));
+				})
+				.catch(() => null);
+		}
+	};
 	const submitQuote = async (targetPostId: string, formData: FormData) => {
 		if (!sessionUserId) {
 			throw new Error("Please log in to quote repost");
 		}
 
-		await createQuote(targetPostId, formData);
+		const createdQuote = await createQuote(targetPostId, formData);
 		setActiveQuotePostId(null);
 		setActionError(null);
-		await refreshSearchResults();
-	};
+		prependCreatedPost(createdQuote);
+		incrementPostStat(targetPostId, "quotes");
 
+		const linkIds = collectSearchResultLinkIds([createdQuote]);
+		if (linkIds.length > 0) {
+			void refreshLinkPreview(linkIds)
+				.then((updatedLink) => {
+					if (!updatedLink) {
+						return;
+					}
+
+					setSearchResults((current) => ({
+						...current,
+						posts: current.posts.map((post) =>
+							post.id === createdQuote.id
+								? applyLinkSummaryToPost(post, updatedLink)
+								: post,
+						),
+					}));
+				})
+				.catch(() => null);
+		}
+	};
 	const handleDelete = async (postId: string) => {
 		if (!sessionUserId) {
 			setActionError("Please log in to delete posts");
@@ -322,7 +376,10 @@ export function SearchPage({ initialQuery }: SearchPageProps) {
 			await deletePost(postId);
 			setActiveReplyPostId((current) => (current === postId ? null : current));
 			setActiveQuotePostId((current) => (current === postId ? null : current));
-			await refreshSearchResults();
+			setSearchResults((current) => ({
+				...current,
+				posts: current.posts.filter((post) => post.id !== postId),
+			}));
 		} catch (deleteError) {
 			if (deleteError instanceof Error) {
 				setActionError(deleteError.message);
