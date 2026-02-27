@@ -68,6 +68,48 @@ export function TimelineFeed({
 		}
 	}, [profileTab, userId]);
 
+	const incrementPostStat = useCallback(
+		(postId: string, statKey: "replies" | "quotes", step = 1) => {
+			setItems((current) =>
+				current.map((item) => {
+					if (item.post.id !== postId) {
+						return item;
+					}
+
+					return {
+						...item,
+						post: {
+							...item.post,
+							stats: {
+								...item.post.stats,
+								[statKey]: Math.max(0, item.post.stats[statKey] + step),
+							},
+						},
+					};
+				}),
+			);
+		},
+		[],
+	);
+
+	const prependCreatedPost = useCallback((post: PostSummary) => {
+		setItems((current) => {
+			if (current.some((item) => item.post.id === post.id)) {
+				return current;
+			}
+
+			const newItem: TimelineItem = {
+				id: `post-${post.id}`,
+				type: "post",
+				createdAt: post.createdAt,
+				actor: post.author,
+				post,
+			};
+
+			return [newItem, ...current];
+		});
+	}, []);
+
 	useEffect(() => {
 		setActiveReplyPostId(null);
 		setActiveQuotePostId(null);
@@ -88,21 +130,7 @@ export function TimelineFeed({
 			return;
 		}
 
-		setItems((current) => {
-			if (current.some((item) => item.post.id === newPost.id)) {
-				return current;
-			}
-
-			const newItem: TimelineItem = {
-				id: `post-${newPost.id}`,
-				type: "post",
-				createdAt: newPost.createdAt,
-				actor: newPost.author,
-				post: newPost,
-			};
-
-			return [newItem, ...current];
-		});
+		prependCreatedPost(newPost);
 
 		const linkIds = collectPostLinkIds(newPost);
 		if (linkIds.length === 0) {
@@ -129,7 +157,7 @@ export function TimelineFeed({
 				);
 			})
 			.catch(() => null);
-	}, [newPost, profileTab, userId]);
+	}, [newPost, prependCreatedPost, profileTab, userId]);
 
 	const sortedItems = useMemo(() => {
 		return [...items].sort(
@@ -220,7 +248,6 @@ export function TimelineFeed({
 		try {
 			const summary = await toggleRepost(postId, isReposted);
 			updatePostInteraction(summary);
-			await loadTimeline();
 		} catch (toggleError) {
 			if (toggleError instanceof Error) {
 				setError(toggleError.message);
@@ -233,9 +260,33 @@ export function TimelineFeed({
 			throw new Error("Please log in to reply");
 		}
 
-		await createReply(postId, formData);
+		const createdReply = await createReply(postId, formData);
 		setActiveReplyPostId(null);
-		await loadTimeline();
+		prependCreatedPost(createdReply);
+		incrementPostStat(postId, "replies");
+		const linkIds = collectPostLinkIds(createdReply);
+		if (linkIds.length > 0) {
+			void refreshLinkPreview(linkIds)
+				.then((refreshedLink) => {
+					if (!refreshedLink) {
+						return;
+					}
+
+					setItems((current) =>
+						current.map((item) => {
+							if (item.post.id !== createdReply.id) {
+								return item;
+							}
+
+							return {
+								...item,
+								post: applyLinkSummaryToPost(item.post, refreshedLink),
+							};
+						}),
+					);
+				})
+				.catch(() => null);
+		}
 	};
 
 	const handleQuote = async (postId: string, formData: FormData) => {
@@ -243,9 +294,33 @@ export function TimelineFeed({
 			throw new Error("Please log in to quote repost");
 		}
 
-		await createQuote(postId, formData);
+		const createdQuote = await createQuote(postId, formData);
 		setActiveQuotePostId(null);
-		await loadTimeline();
+		prependCreatedPost(createdQuote);
+		incrementPostStat(postId, "quotes");
+		const linkIds = collectPostLinkIds(createdQuote);
+		if (linkIds.length > 0) {
+			void refreshLinkPreview(linkIds)
+				.then((refreshedLink) => {
+					if (!refreshedLink) {
+						return;
+					}
+
+					setItems((current) =>
+						current.map((item) => {
+							if (item.post.id !== createdQuote.id) {
+								return item;
+							}
+
+							return {
+								...item,
+								post: applyLinkSummaryToPost(item.post, refreshedLink),
+							};
+						}),
+					);
+				})
+				.catch(() => null);
+		}
 	};
 
 	const handleDelete = async (postId: string) => {
