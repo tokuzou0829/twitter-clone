@@ -1,6 +1,14 @@
 "use client";
 
-import { type MouseEvent as ReactMouseEvent, useMemo, useState } from "react";
+import {
+	type MouseEvent as ReactMouseEvent,
+	type SyntheticEvent,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import type { LinkSummary } from "@/lib/social-api";
 
 type LinkPreviewCardProps = {
@@ -19,6 +27,8 @@ export function LinkPreviewCard({ link }: LinkPreviewCardProps) {
 		[link.url],
 	);
 	const [isYouTubeEmbedVisible, setIsYouTubeEmbedVisible] = useState(false);
+	const [isYouTubeIframeLoaded, setIsYouTubeIframeLoaded] = useState(false);
+	const youtubeIframeRef = useRef<HTMLIFrameElement | null>(null);
 	const youtubeEmbedUrl = useMemo(() => {
 		if (!youtubePreviewEmbedUrl) {
 			return null;
@@ -35,8 +45,46 @@ export function LinkPreviewCard({ link }: LinkPreviewCardProps) {
 		event: ReactMouseEvent<HTMLButtonElement>,
 	) => {
 		event.stopPropagation();
+		setIsYouTubeIframeLoaded(false);
 		setIsYouTubeEmbedVisible(true);
 	};
+
+	const playYouTubeVideo = useCallback(() => {
+		const iframeWindow = youtubeIframeRef.current?.contentWindow;
+		if (!iframeWindow) {
+			return;
+		}
+
+		iframeWindow.postMessage(
+			JSON.stringify({
+				event: "command",
+				func: "playVideo",
+				args: [],
+			}),
+			"https://www.youtube-nocookie.com",
+		);
+	}, []);
+
+	const handleYouTubeIframeLoad = (
+		event: SyntheticEvent<HTMLIFrameElement>,
+	) => {
+		event.stopPropagation();
+		setIsYouTubeIframeLoaded(true);
+		playYouTubeVideo();
+	};
+
+	useEffect(() => {
+		if (!isYouTubeEmbedVisible || !youtubeEmbedUrl || !isYouTubeIframeLoaded) {
+			return;
+		}
+
+		playYouTubeVideo();
+	}, [
+		isYouTubeEmbedVisible,
+		youtubeEmbedUrl,
+		isYouTubeIframeLoaded,
+		playYouTubeVideo,
+	]);
 
 	if (youtubeEmbedUrl && !isYouTubeEmbedVisible) {
 		return (
@@ -81,10 +129,12 @@ export function LinkPreviewCard({ link }: LinkPreviewCardProps) {
 			>
 				<div className="aspect-video w-full bg-black">
 					<iframe
+						ref={youtubeIframeRef}
 						src={youtubeEmbedUrl}
 						title={`${title} - YouTube`}
 						className="h-full w-full"
 						loading="lazy"
+						onLoad={handleYouTubeIframeLoad}
 						referrerPolicy="strict-origin-when-cross-origin"
 						allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
 						allowFullScreen
@@ -178,9 +228,12 @@ const createYouTubeEmbedUrl = (
 		embedUrl.searchParams.set("start", String(startTimeSeconds));
 	}
 
+	embedUrl.searchParams.set("enablejsapi", "1");
+	embedUrl.searchParams.set("playsinline", "1");
+
 	if (options?.autoplay) {
 		embedUrl.searchParams.set("autoplay", "1");
-		embedUrl.searchParams.set("playsinline", "1");
+		embedUrl.searchParams.set("mute", "1");
 	}
 
 	return embedUrl.toString();
