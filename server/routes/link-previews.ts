@@ -141,7 +141,25 @@ const app = createHonoApp()
 			throw new HTTPException(400, { message: "Invalid URL" });
 		}
 
+		const db = c.get("db");
 		const parsedUrl = new URL(normalizedUrl);
+		const now = new Date();
+		const [existingLink] = await db
+			.select(linkSummarySelection)
+			.from(schema.links)
+			.where(eq(schema.links.normalizedUrl, normalizedUrl))
+			.limit(1);
+
+		if (
+			existingLink &&
+			existingLink.ogpNextRefreshAt &&
+			existingLink.ogpNextRefreshAt > now
+		) {
+			return c.json({
+				link: toLinkSummary(existingLink),
+			});
+		}
+
 		let preview: {
 			title: string | null;
 			description: string | null;
@@ -152,6 +170,12 @@ const app = createHonoApp()
 		try {
 			preview = await fetchOpenGraphPreview(normalizedUrl);
 		} catch {
+			if (existingLink) {
+				return c.json({
+					link: toLinkSummary(existingLink),
+				});
+			}
+
 			return c.json({
 				link: {
 					id: `preview-${normalizedUrl}`,
@@ -168,19 +192,45 @@ const app = createHonoApp()
 			});
 		}
 
-		return c.json({
-			link: {
-				id: `preview-${normalizedUrl}`,
-				url: normalizedUrl,
+		const nextRefreshAt = new Date(now.getTime() + OGP_REFRESH_INTERVAL_MS);
+		const [savedLink] = await db
+			.insert(schema.links)
+			.values({
+				id: uuidv7(),
+				normalizedUrl,
 				host: parsedUrl.host,
 				displayUrl: createDisplayUrl(parsedUrl),
 				title: preview.title,
 				description: preview.description,
 				imageUrl: preview.imageUrl,
 				siteName: preview.siteName,
-				ogpFetchedAt: new Date().toISOString(),
-				ogpNextRefreshAt: null,
-			},
+				ogpFetchedAt: now,
+				ogpNextRefreshAt: nextRefreshAt,
+				createdAt: now,
+				updatedAt: now,
+			})
+			.onConflictDoUpdate({
+				target: schema.links.normalizedUrl,
+				set: {
+					host: parsedUrl.host,
+					displayUrl: createDisplayUrl(parsedUrl),
+					title: preview.title,
+					description: preview.description,
+					imageUrl: preview.imageUrl,
+					siteName: preview.siteName,
+					ogpFetchedAt: now,
+					ogpNextRefreshAt: nextRefreshAt,
+					updatedAt: now,
+				},
+			})
+			.returning(linkSummarySelection);
+
+		if (!savedLink) {
+			throw new Error("Failed to save link preview");
+		}
+
+		return c.json({
+			link: toLinkSummary(savedLink),
 		});
 	})
 	.post("/preview", zValidator("json", previewRequestSchema), async (c) => {
