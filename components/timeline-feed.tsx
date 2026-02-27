@@ -8,6 +8,7 @@ import {
 	deletePost,
 	fetchTimeline,
 	type LinkSummary,
+	type PostSummary,
 	type ProfileTimelineTab,
 	refreshLinkPreview,
 	type TimelineItem,
@@ -24,12 +25,14 @@ type TimelineFeedProps = {
 	userId?: string;
 	sessionUserId: string | null;
 	profileTab?: ProfileTimelineTab;
+	newPost?: PostSummary | null;
 };
 
 export function TimelineFeed({
 	userId,
 	sessionUserId,
 	profileTab = "posts",
+	newPost = null,
 }: TimelineFeedProps) {
 	const [items, setItems] = useState<TimelineItem[]>([]);
 	const [error, setError] = useState<string | null>(null);
@@ -79,6 +82,54 @@ export function TimelineFeed({
 		setActiveReplyPostId(null);
 		setActiveQuotePostId(null);
 	}, [sessionUserId]);
+
+	useEffect(() => {
+		if (!newPost || userId || profileTab !== "posts") {
+			return;
+		}
+
+		setItems((current) => {
+			if (current.some((item) => item.post.id === newPost.id)) {
+				return current;
+			}
+
+			const newItem: TimelineItem = {
+				id: `post-${newPost.id}`,
+				type: "post",
+				createdAt: newPost.createdAt,
+				actor: newPost.author,
+				post: newPost,
+			};
+
+			return [newItem, ...current];
+		});
+
+		const linkIds = collectPostLinkIds(newPost);
+		if (linkIds.length === 0) {
+			return;
+		}
+
+		void refreshLinkPreview(linkIds)
+			.then((refreshedLink) => {
+				if (!refreshedLink) {
+					return;
+				}
+
+				setItems((current) =>
+					current.map((item) => {
+						if (item.post.id !== newPost.id) {
+							return item;
+						}
+
+						return {
+							...item,
+							post: applyLinkSummaryToPost(item.post, refreshedLink),
+						};
+					}),
+				);
+			})
+			.catch(() => null);
+	}, [newPost, profileTab, userId]);
 
 	const sortedItems = useMemo(() => {
 		return [...items].sort(
