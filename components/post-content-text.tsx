@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -51,32 +52,31 @@ export function PostContent({
 					p: ({ children }) => (
 						<p className="whitespace-pre-wrap">{children}</p>
 					),
-					pre: ({ children }) => (
-						<pre className="mt-2 overflow-x-auto rounded-xl bg-zinc-950/95 p-3 text-sm text-zinc-100">
-							{children}
-						</pre>
-					),
-					code: ({ inline, className: codeClassName, children }) => {
-						if (inline) {
-							return (
-								<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.9em] text-zinc-800">
-									{children}
-								</code>
-							);
-						}
-
-						const language = codeClassName?.replace("language-", "") ?? "";
+					pre: ({ children }) => {
+						const language = extractCodeLanguageFromPreChildren(children);
 						const extraLabel =
 							language === "mermaid" || language === "tex"
 								? ` (${language})`
 								: "";
 
 						return (
-							<code className={codeClassName}>
+							<pre className="mt-2 overflow-x-auto rounded-xl bg-zinc-950/95 p-3 text-sm text-zinc-100">
 								{children}
 								{extraLabel ? (
 									<span className="sr-only">{extraLabel}</span>
 								) : null}
+							</pre>
+						);
+					},
+					code: ({ className: codeClassName, children }) => {
+						const isBlockCode = (codeClassName ?? "").startsWith("language-");
+						if (isBlockCode) {
+							return <code className={codeClassName}>{children}</code>;
+						}
+
+						return (
+							<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.9em] text-zinc-800">
+								{children}
 							</code>
 						);
 					},
@@ -125,17 +125,14 @@ const buildMarkdownSource = (
 		const chunkEnd = nextSegment?.start ?? content.length;
 		const chunk = content.slice(cursor, chunkEnd);
 
-		parts.push(
-			replaceMentionsAndHashtags(
-				chunk,
-				cursor,
-				mentionRanges,
-				() => mentionIndex,
-				(value) => {
-					mentionIndex = value;
-				},
-			),
+		const [processedChunk, nextMentionIndex] = replaceMentionsAndHashtags(
+			chunk,
+			cursor,
+			mentionRanges,
+			mentionIndex,
 		);
+		parts.push(processedChunk);
+		mentionIndex = nextMentionIndex;
 		cursor = chunkEnd;
 	}
 
@@ -146,12 +143,11 @@ const replaceMentionsAndHashtags = (
 	segment: string,
 	segmentOffset: number,
 	mentions: PostMentionSummary[],
-	getMentionIndex: () => number,
-	setMentionIndex: (value: number) => void,
-) => {
+	initialMentionIndex: number,
+): [string, number] => {
 	let output = "";
 	let localCursor = 0;
-	let mentionIndex = getMentionIndex();
+	let mentionIndex = initialMentionIndex;
 
 	while (localCursor < segment.length) {
 		while (
@@ -185,8 +181,7 @@ const replaceMentionsAndHashtags = (
 		mentionIndex += 1;
 	}
 
-	setMentionIndex(mentionIndex);
-	return output;
+	return [output, mentionIndex];
 };
 
 const linkifyHashtags = (text: string) => {
@@ -233,4 +228,22 @@ const normalizeMentionRanges = (
 	}
 
 	return normalizedMentions;
+};
+
+const extractCodeLanguageFromPreChildren = (children: ReactNode) => {
+	const nodes = Children.toArray(children);
+	const firstNode = nodes[0];
+	if (!isValidElement(firstNode)) {
+		return "";
+	}
+
+	const className =
+		typeof firstNode.props.className === "string"
+			? firstNode.props.className
+			: "";
+	if (!className.startsWith("language-")) {
+		return "";
+	}
+
+	return className.replace("language-", "");
 };
