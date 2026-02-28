@@ -20,7 +20,7 @@ import {
 import { createDisplayHandle } from "@/lib/user-handle";
 import { Modal } from "./modal";
 import { PostComposer } from "./post-composer";
-import { renderPostContent } from "./post-content-text";
+import { PostContent } from "./post-content-text";
 import { PostFeedItem } from "./post-feed-item";
 
 type PostDetailPageProps = {
@@ -548,9 +548,11 @@ function ComposerTargetCard({ label, post }: ComposerTargetCardProps) {
 				</span>
 			</p>
 			{post.content ? (
-				<p className="mt-1 max-h-28 overflow-hidden whitespace-pre-wrap text-sm text-[var(--text-main)]">
-					{renderPostContent(post.content, post.mentions)}
-				</p>
+				<PostContent
+					content={post.content}
+					mentions={post.mentions}
+					className="mt-1 max-h-28 overflow-hidden text-sm text-[var(--text-main)]"
+				/>
 			) : (
 				<p className="mt-1 text-sm text-[var(--text-subtle)]">
 					Media-only post
