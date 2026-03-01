@@ -47,6 +47,33 @@ describe("/routes/discover", () => {
 		expect(json.trends.some((trend) => trend.tag === "#legacy")).toBe(false);
 	});
 
+	it("トレンド集計は500件を超えてもカウントできる", async () => {
+		const user = await createUser();
+
+		const now = new Date();
+		await db.insert(schema.posts).values(
+			Array.from({ length: 550 }, (_, index) => ({
+				id: `discover_post_many_${index}`,
+				authorId: user.id,
+				content: "bulk #alice",
+				createdAt: now,
+				updatedAt: now,
+			})),
+		);
+
+		const response = await app.request("/", {
+			method: "GET",
+		});
+		const json = (await response.json()) as {
+			trends: Array<{ tag: string; count: number }>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(json.trends.find((trend) => trend.tag === "#alice")?.count).toBe(
+			550,
+		);
+	});
+
 	it("おすすめユーザーは自分とフォロー済みを除外する", async () => {
 		const currentUser = await createUser();
 
