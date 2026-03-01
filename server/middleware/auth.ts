@@ -81,7 +81,7 @@ export const getDeveloperUserOrThrow = async (c: Context) => {
 	return { user };
 };
 
-const resolveClientIp = (headers: Headers): string | null => {
+export const resolveClientIp = (headers: Headers): string | null => {
 	const candidates = [
 		headers.get("cf-connecting-ip"),
 		headers.get("x-real-ip"),
