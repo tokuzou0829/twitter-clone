@@ -28,6 +28,10 @@ body {
 	text-rendering: optimizeLegibility;
 }
 
+body:has([data-embed-route]) {
+	background: transparent;
+}
+
 * {
 	border-color: var(--border-subtle);
 }
