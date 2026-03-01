@@ -23,6 +23,7 @@ import type { PostSummary, UserSummary } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { LinkPreviewCard } from "./link-preview-card";
 import { renderPostContent } from "./post-content-text";
+import { PostShareButton } from "./post-share-button";
 
 type PostFeedItemProps = {
 	post: PostSummary;
@@ -596,6 +597,7 @@ export function PostFeedItem({
 							}
 							icon={<Heart className="h-[18px] w-[18px]" />}
 						/>
+						<PostShareButton postId={post.id} updatedAt={post.updatedAt} />
 					</div>
 				</div>
 			</div>

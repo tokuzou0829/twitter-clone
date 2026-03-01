@@ -8,6 +8,7 @@ type ModalProps = {
 	onClose: () => void;
 	title?: string;
 	panelClassName?: string;
+	zIndexClassName?: string;
 };
 
 export function Modal({
@@ -15,6 +16,7 @@ export function Modal({
 	onClose,
 	title,
 	panelClassName,
+	zIndexClassName,
 }: ModalProps) {
 	const headingId = useId();
 
@@ -36,7 +38,9 @@ export function Modal({
 	}, [onClose]);
 
 	return (
-		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 sm:items-center sm:p-4">
+		<div
+			className={`fixed inset-0 ${zIndexClassName ?? "z-50"} flex items-end justify-center bg-black/45 sm:items-center sm:p-4`}
+		>
 			<button
 				type="button"
 				onClick={onClose}

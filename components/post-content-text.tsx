@@ -6,9 +6,14 @@ import type { PostMentionSummary } from "@/lib/social-api";
 
 const HASHTAG_LINK_REGEX = /#[\p{L}\p{N}_]{1,50}/gu;
 
+type RenderPostContentOptions = {
+	openLinksInNewTab?: boolean;
+};
+
 export function renderPostContent(
 	content: string,
 	mentions: PostMentionSummary[] = [],
+	options: RenderPostContentOptions = {},
 ) {
 	const links = extractPostLinks(content);
 	const normalizedMentionRanges = normalizeMentionRanges(
@@ -17,7 +22,7 @@ export function renderPostContent(
 		links,
 	);
 	if (links.length === 0 && normalizedMentionRanges.length === 0) {
-		return renderHashtagsFromSegment(content, 0, content);
+		return renderHashtagsFromSegment(content, 0, content, options);
 	}
 
 	const fragments: ReactNode[] = [];
@@ -43,7 +48,12 @@ export function renderPostContent(
 
 		if (!hasLinkToken && !hasMentionToken) {
 			fragments.push(
-				...renderHashtagsFromSegment(content.slice(cursor), cursor, content),
+				...renderHashtagsFromSegment(
+					content.slice(cursor),
+					cursor,
+					content,
+					options,
+				),
 			);
 			break;
 		}
@@ -63,6 +73,7 @@ export function renderPostContent(
 					content.slice(cursor, tokenStart),
 					cursor,
 					content,
+					options,
 				),
 			);
 		}
@@ -88,10 +99,15 @@ export function renderPostContent(
 
 		if (nextMention) {
 			const mentionText = content.slice(nextMention.start, nextMention.end);
+			const mentionRel = options.openLinksInNewTab
+				? "noopener noreferrer"
+				: undefined;
 			fragments.push(
 				<Link
 					key={`mention-${nextMention.user.id}-${nextMention.start}`}
 					href={`/users/${nextMention.user.id}`}
+					target={options.openLinksInNewTab ? "_blank" : undefined}
+					rel={mentionRel}
 					data-no-post-nav="true"
 					className="text-sky-600 hover:underline break-all"
 				>
@@ -159,6 +175,7 @@ function renderHashtagsFromSegment(
 	segment: string,
 	segmentOffset: number,
 	fullContent: string,
+	options: RenderPostContentOptions,
 ) {
 	const fragments: ReactNode[] = [];
 	let cursor = 0;
@@ -183,10 +200,16 @@ function renderHashtagsFromSegment(
 		}
 
 		const normalizedTag = `#${matchedTag.slice(1).toLowerCase()}`;
+		const hashtagRel = options.openLinksInNewTab
+			? "noopener noreferrer"
+			: undefined;
 		fragments.push(
 			<Link
 				key={`hashtag-${segmentOffset}-${hashtagIndex}`}
 				href={`/search?q=${encodeURIComponent(normalizedTag)}`}
+				target={options.openLinksInNewTab ? "_blank" : undefined}
+				rel={hashtagRel}
+				data-no-post-nav="true"
 				className="text-sky-600 hover:underline break-all"
 			>
 				{matchedTag}

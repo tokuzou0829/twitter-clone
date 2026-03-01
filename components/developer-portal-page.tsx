@@ -3,6 +3,7 @@
 import {
 	Bot,
 	CircleDashed,
+	Code2,
 	FileText,
 	KeyRound,
 	Link2,
@@ -21,12 +22,14 @@ import {
 } from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { DeveloperApiTokenManager } from "./developer-api-token-manager";
+import { DeveloperEmbedStudio } from "./developer-embed-studio";
 import { DeveloperNotificationWebhookStatus } from "./developer-notification-webhook-status";
 import { LinkPreviewCard } from "./link-preview-card";
 import { Modal } from "./modal";
 
 type DeveloperPortalTool =
 	| "link-preview"
+	| "embed-studio"
 	| "api-tokens"
 	| "notification-webhooks";
 
@@ -51,6 +54,14 @@ const DEVELOPER_TOOLS: DeveloperTool[] = [
 		icon: Link2,
 		disabled: false,
 		href: "/developer/link-preview",
+	},
+	{
+		id: "embed-studio",
+		label: "Embed Studio",
+		description: "埋め込みURL編集とプレビュー",
+		icon: Code2,
+		disabled: false,
+		href: "/developer/embed",
 	},
 	{
 		id: "api-tokens",
@@ -87,6 +98,7 @@ const DEVELOPER_TOOLS: DeveloperTool[] = [
 
 const ACTIVE_HREF_BY_TOOL: Record<DeveloperPortalTool, string> = {
 	"link-preview": "/developer/link-preview",
+	"embed-studio": "/developer/embed",
 	"api-tokens": "/developer/api-tokens",
 	"notification-webhooks": "/developer/notification-webhooks",
 };
@@ -490,6 +502,12 @@ export function DeveloperPortalPage({ tool }: DeveloperPortalPageProps) {
 									</div>
 								</section>
 							</>
+						) : tool === "embed-studio" ? (
+							<DeveloperEmbedStudio
+								isDeveloper={isDeveloper}
+								sessionUserId={sessionUserId}
+								onRequireDeveloper={() => setIsOptInModalOpen(true)}
+							/>
 						) : tool === "api-tokens" ? (
 							<DeveloperApiTokenManager
 								isDeveloper={isDeveloper}
