@@ -7,30 +7,34 @@ import app from "./discover";
 const { createUser, db } = await setup();
 
 describe("/routes/discover", () => {
+	const fixedDate = new Date("2026-01-10T10:00:00.000Z");
+	const oldDate = new Date("2025-12-31T10:00:00.000Z");
+
 	it("直近投稿のハッシュタグからトレンドを返す", async () => {
-		const user = await createUser();
+		const userA = await createUser();
+		const userB = await createUser();
 
 		await db.insert(schema.posts).values([
 			{
 				id: "discover_post_1",
-				authorId: user.id,
+				authorId: userA.id,
 				content: "Working with #NextJS and #TypeScript",
-				createdAt: new Date(),
-				updatedAt: new Date(),
+				createdAt: fixedDate,
+				updatedAt: fixedDate,
 			},
 			{
 				id: "discover_post_2",
-				authorId: user.id,
+				authorId: userB.id,
 				content: "Shipped feature using #nextjs",
-				createdAt: new Date(),
-				updatedAt: new Date(),
+				createdAt: fixedDate,
+				updatedAt: fixedDate,
 			},
 			{
 				id: "discover_post_old",
-				authorId: user.id,
+				authorId: userA.id,
 				content: "Old topic #legacy",
-				createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
-				updatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+				createdAt: oldDate,
+				updatedAt: oldDate,
 			},
 		]);
 
@@ -47,19 +51,26 @@ describe("/routes/discover", () => {
 		expect(json.trends.some((trend) => trend.tag === "#legacy")).toBe(false);
 	});
 
-	it("トレンド集計は500件を超えてもカウントできる", async () => {
-		const user = await createUser();
+	it("トレンド集計は500件超を読みつつ、単一ユーザー連投を抑制する", async () => {
+		const userA = await createUser();
+		const userB = await createUser();
 
-		const now = new Date();
-		await db.insert(schema.posts).values(
-			Array.from({ length: 550 }, (_, index) => ({
-				id: `discover_post_many_${index}`,
-				authorId: user.id,
+		await db.insert(schema.posts).values([
+			...Array.from({ length: 550 }, (_, index) => ({
+				id: `discover_post_many_a_${index}`,
+				authorId: userA.id,
 				content: "bulk #alice",
-				createdAt: now,
-				updatedAt: now,
+				createdAt: fixedDate,
+				updatedAt: fixedDate,
 			})),
-		);
+			...Array.from({ length: 30 }, (_, index) => ({
+				id: `discover_post_many_b_${index}`,
+				authorId: userB.id,
+				content: "bulk #alice",
+				createdAt: fixedDate,
+				updatedAt: fixedDate,
+			})),
+		]);
 
 		const response = await app.request("/", {
 			method: "GET",
@@ -69,9 +80,7 @@ describe("/routes/discover", () => {
 		};
 
 		expect(response.status).toBe(200);
-		expect(json.trends.find((trend) => trend.tag === "#alice")?.count).toBe(
-			550,
-		);
+		expect(json.trends.find((trend) => trend.tag === "#alice")?.count).toBe(10);
 	});
 
 	it("おすすめユーザーは自分とフォロー済みを除外する", async () => {
@@ -116,7 +125,7 @@ describe("/routes/discover", () => {
 			id: "discover_follow_id",
 			followerId: currentUser.id,
 			followingId: "discover_user_followed",
-			createdAt: new Date(),
+			createdAt: fixedDate,
 		});
 
 		const response = await app.request("/", {
