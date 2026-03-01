@@ -29,6 +29,15 @@ const QUERY_HASHTAG_REGEX = /#([\p{L}\p{N}_]{1,50})/gu;
 const escapeLike = (value: string): string =>
 	value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 
+const escapeRegex = (value: string) =>
+	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const buildHashtagTokenRegex = (hashtag: string) =>
+	new RegExp(`(?:^|\\s)#${escapeRegex(hashtag)}(?![\\p{L}\\p{N}_])`, "iu");
+
+const includesAllQueryHashtags = (content: string, hashtags: string[]) =>
+	hashtags.every((hashtag) => buildHashtagTokenRegex(hashtag).test(content));
+
 const app = createHonoApp()
 	.get(
 		"/mentions",
@@ -87,29 +96,43 @@ export default app;
 
 const loadPostIdsByQuery = async (db: Database, query: string) => {
 	const queryHashtags = extractQueryHashtags(query);
-	const whereClause =
-		queryHashtags.length >= 2
-			? and(
-					isNotNull(schema.posts.content),
-					...queryHashtags.map((hashtag) =>
-						ilike(schema.posts.content, `%#${hashtag}%`),
-					),
-				)
-			: and(
-					isNotNull(schema.posts.content),
-					ilike(schema.posts.content, `%${query}%`),
-				);
+	const hashtagMode = queryHashtags.length > 0;
+	const whereClause = hashtagMode
+		? and(
+				isNotNull(schema.posts.content),
+				...queryHashtags.map((hashtag) =>
+					ilike(schema.posts.content, `%#${escapeLike(hashtag)}%`),
+				),
+			)
+		: and(
+				isNotNull(schema.posts.content),
+				ilike(schema.posts.content, `%${escapeLike(query)}%`),
+			);
 
 	const rows = await db
 		.select({
 			id: schema.posts.id,
+			content: schema.posts.content,
 		})
 		.from(schema.posts)
 		.where(whereClause)
 		.orderBy(desc(schema.posts.createdAt))
-		.limit(SEARCH_POST_LIMIT);
+		.limit(SEARCH_HASHTAG_SAMPLE_LIMIT);
 
-	return rows.map((row) => row.id);
+	return rows
+		.filter((row) => {
+			if (!hashtagMode) {
+				return true;
+			}
+
+			if (!row.content) {
+				return false;
+			}
+
+			return includesAllQueryHashtags(row.content, queryHashtags);
+		})
+		.slice(0, SEARCH_POST_LIMIT)
+		.map((row) => row.id);
 };
 
 const loadUsersByQuery = async (
@@ -201,7 +224,11 @@ const loadHashtagMatches = async (
 			}
 
 			const normalizedTag = rawTag.toLowerCase();
-			if (
+			if (queryHashtags.length === 1) {
+				if (normalizedTag !== queryHashtags[0]) {
+					continue;
+				}
+			} else if (
 				queryHashtags.length < 2 &&
 				!normalizedTag.includes(normalizedQuery)
 			) {
