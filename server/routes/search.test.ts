@@ -74,7 +74,7 @@ describe("/routes/search", () => {
 			{
 				id: "search_exact_tag_post_b",
 				authorId: user.id,
-				content: "これは #hanaは政府の陰謀 です",
+				content: "これは #hanaはただの日記 です",
 				createdAt: new Date("2026-01-02T10:00:00Z"),
 				updatedAt: new Date("2026-01-02T10:00:00Z"),
 			},
