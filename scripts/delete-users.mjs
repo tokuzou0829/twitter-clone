@@ -5,30 +5,28 @@ import { AwsClient } from "aws4fetch";
 import { config as loadEnv } from "dotenv";
 import postgres from "postgres";
 
-const HELP_TEXT = `Delete posts by content substring and/or author id.
+const HELP_TEXT = `Delete users by name substring.
 
 Usage:
-  pnpm posts:delete -- --contains "<text>" [--author-id "<id>"] [--limit <n>] [--concurrency <n>] [--apply]
-  pnpm posts:delete -- --author-id "<id>" [--limit <n>] [--concurrency <n>] [--apply]
+  pnpm users:delete -- --name-contains "<text>" [--limit <n>] [--concurrency <n>] [--apply]
 
 Options:
-  --contains <text>     Match posts whose content includes <text> (case-sensitive)
-  --author-id <id>      Match posts by exact author id
-  --limit <n>           Maximum number of matched posts to process
-  --concurrency <n>     Number of parallel workers (default: 10, max: 100)
-  --apply               Execute deletion (default is dry-run)
-  --help                Show this help message
+  --name-contains <text> Match users whose name includes <text> (case-insensitive)
+  --limit <n>            Maximum number of matched users to process
+  --concurrency <n>      Number of parallel workers (default: 10, max: 100)
+  --apply                Execute deletion (default is dry-run)
+  --help                 Show this help message
 
 Rules:
-  - At least one of --contains or --author-id is required
-  - If both are specified, matching is AND
-  - --concurrency applies to both post and file deletion
+  - --name-contains is required
+  - --concurrency applies to both user and file deletion
   - Without --apply, this command does not delete data
 `;
 
 const DEFAULT_CONCURRENCY = 10;
 const MAX_CONCURRENCY = 100;
 const TRANSACTION_MAX_RETRIES = 3;
+const PREVIEW_LIMIT = 20;
 
 const main = async () => {
 	loadEnv({ path: ".env.local", override: false, quiet: true });
@@ -40,8 +38,7 @@ const main = async () => {
 	const { values } = parseArgs({
 		args,
 		options: {
-			contains: { type: "string" },
-			"author-id": { type: "string" },
+			"name-contains": { type: "string" },
 			limit: { type: "string" },
 			concurrency: { type: "string" },
 			apply: { type: "boolean", default: false },
@@ -56,15 +53,13 @@ const main = async () => {
 		return;
 	}
 
-	const contains = normalizeOptionalString(values.contains);
-	const authorId = normalizeOptionalString(values["author-id"]);
+	const nameContains = normalizeRequiredString(
+		values["name-contains"],
+		"--name-contains",
+	);
 	const limit = parseOptionalPositiveInt(values.limit, "--limit");
 	const concurrency = resolveConcurrency(values.concurrency);
 	const apply = values.apply;
-
-	if (!contains && !authorId) {
-		throw new Error("Specify at least one filter: --contains or --author-id");
-	}
 
 	const databaseUrl = process.env.DATABASE_URL;
 	if (!databaseUrl) {
@@ -74,25 +69,23 @@ const main = async () => {
 	const sql = postgres(databaseUrl, { prepare: false });
 
 	try {
-		const targetPosts = await loadTargetPosts(sql, {
-			contains,
-			authorId,
+		const targetUsers = await loadTargetUsers(sql, {
+			nameContains,
 			limit,
 		});
 
 		printMatchSummary({
-			targetPosts,
-			contains,
-			authorId,
+			targetUsers,
+			nameContains,
 			limit,
 			concurrency,
 			apply,
 		});
 
-		if (!apply || targetPosts.length === 0) {
+		if (!apply || targetUsers.length === 0) {
 			if (!apply) {
 				console.log(
-					"\nDry-run only. Re-run with --apply to delete matched posts.",
+					"\nDry-run only. Re-run with --apply to delete matched users.",
 				);
 			}
 			return;
@@ -101,19 +94,19 @@ const main = async () => {
 		const r2Context = createR2ContextFromEnv();
 		if (!r2Context) {
 			console.warn(
-				"[warn] R2 config is incomplete. Post rows will be deleted, but file cleanup will be skipped.",
+				"[warn] R2 config is incomplete. User rows will be deleted, but file cleanup will be skipped.",
 			);
 		}
 
-		const result = await deleteMatchedPosts(
+		const result = await deleteMatchedUsers(
 			sql,
-			targetPosts,
+			targetUsers,
 			r2Context,
 			concurrency,
 		);
 		printDeleteSummary(result);
 
-		if (result.failedPostIds.length > 0) {
+		if (result.failedUserIds.length > 0) {
 			process.exitCode = 1;
 		}
 	} finally {
@@ -121,108 +114,64 @@ const main = async () => {
 	}
 };
 
-const loadTargetPosts = async (sql, filters) => {
+const loadTargetUsers = async (sql, filters) => {
 	const limitClause =
 		typeof filters.limit === "number" ? sql`LIMIT ${filters.limit}` : sql``;
-	const escapedContains = filters.contains
-		? `%${escapeLikePattern(filters.contains)}%`
-		: null;
-
-	if (escapedContains && filters.authorId) {
-		return await sql`
-			SELECT
-				id,
-				author_id AS "authorId",
-				content,
-				created_at AS "createdAt"
-			FROM posts
-			WHERE content LIKE ${escapedContains} ESCAPE '\\'
-				AND author_id = ${filters.authorId}
-			ORDER BY created_at ASC
-			${limitClause}
-		`;
-	}
-
-	if (escapedContains) {
-		return await sql`
-			SELECT
-				id,
-				author_id AS "authorId",
-				content,
-				created_at AS "createdAt"
-			FROM posts
-			WHERE content LIKE ${escapedContains} ESCAPE '\\'
-			ORDER BY created_at ASC
-			${limitClause}
-		`;
-	}
-
-	if (filters.authorId) {
-		return await sql`
-			SELECT
-				id,
-				author_id AS "authorId",
-				content,
-				created_at AS "createdAt"
-			FROM posts
-			WHERE author_id = ${filters.authorId}
-			ORDER BY created_at ASC
-			${limitClause}
-		`;
-	}
+	const escapedContains = `%${escapeLikePattern(filters.nameContains)}%`;
 
 	return await sql`
 		SELECT
 			id,
-			author_id AS "authorId",
-			content,
+			name,
+			handle,
 			created_at AS "createdAt"
-		FROM posts
+		FROM "user"
+		WHERE name ILIKE ${escapedContains} ESCAPE '\\'
 		ORDER BY created_at ASC
 		${limitClause}
 	`;
 };
 
-const deleteMatchedPosts = async (sql, targetPosts, r2Context, concurrency) => {
-	const deletedPostIds = [];
-	const skippedPostIds = [];
-	const failedPostIds = [];
+const deleteMatchedUsers = async (sql, targetUsers, r2Context, concurrency) => {
+	const deletedUserIds = [];
+	const skippedUserIds = [];
+	const failedUserIds = [];
 	const fileIdsToDelete = new Set();
 	let fileDeleteFailures = 0;
 	let fileDeleteSkipped = 0;
 
-	const postResults = await mapWithConcurrency(
-		targetPosts,
+	const userResults = await mapWithConcurrency(
+		targetUsers,
 		concurrency,
-		async (targetPost) => {
+		async (targetUser) => {
 			try {
-				const deleted = await deleteSinglePost(sql, targetPost);
+				const deleted = await deleteSingleUser(sql, targetUser);
 				if (!deleted) {
-					return { status: "skipped", postId: targetPost.id };
+					return { status: "skipped", userId: targetUser.id };
 				}
 
 				return {
 					status: "deleted",
-					postId: targetPost.id,
+					userId: targetUser.id,
 					fileIds: deleted.fileIds,
 				};
 			} catch (error) {
 				return {
 					status: "failed",
-					postId: targetPost.id,
+					userId: targetUser.id,
 					error,
 				};
 			}
 		},
 	);
 
-	for (const result of postResults) {
+	for (const result of userResults) {
 		if (!result) {
 			continue;
 		}
 
 		if (result.status === "deleted") {
-			deletedPostIds.push(result.postId);
+			deletedUserIds.push(result.userId);
 			for (const fileId of result.fileIds) {
 				fileIdsToDelete.add(fileId);
 			}
@@ -230,13 +179,13 @@ const deleteMatchedPosts = async (sql, targetPosts, r2Context, concurrency) => {
 		}
 
 		if (result.status === "skipped") {
-			skippedPostIds.push(result.postId);
+			skippedUserIds.push(result.userId);
 			continue;
 		}
 
-		failedPostIds.push(result.postId);
+		failedUserIds.push(result.userId);
 		console.error(
-			`[error] failed to delete post ${result.postId}: ${toErrorMessage(result.error)}`,
+			`[error] failed to delete user ${result.userId}: ${toErrorMessage(result.error)}`,
 		);
 	}
 
@@ -274,62 +223,66 @@ const deleteMatchedPosts = async (sql, targetPosts, r2Context, concurrency) => {
 	}
 
 	return {
-		deletedPostIds,
-		skippedPostIds,
-		failedPostIds,
+		deletedUserIds,
+		skippedUserIds,
+		failedUserIds,
 		fileDeleteFailures,
 		fileDeleteSkipped,
 	};
 };
 
-const deleteSinglePost = async (sql, targetPost) => {
+const deleteSingleUser = async (sql, targetUser) => {
 	for (let attempt = 0; attempt < TRANSACTION_MAX_RETRIES; attempt += 1) {
 		try {
 			return await sql.begin(async (tx) => {
-				const [currentPost] = await tx`
-					SELECT reply_to_post_id AS "replyToPostId"
-					FROM posts
-					WHERE id = ${targetPost.id}
+				const [currentUser] = await tx`
+					SELECT
+						id,
+						avatar_file_id AS "avatarFileId",
+						banner_file_id AS "bannerFileId"
+					FROM "user"
+					WHERE id = ${targetUser.id}
 					FOR NO KEY UPDATE
 				`;
 
-				if (!currentPost) {
+				if (!currentUser) {
 					return null;
 				}
 
 				const imageRows = await tx`
-					SELECT file_id AS "fileId"
+					SELECT post_images.file_id AS "fileId"
 					FROM post_images
-					WHERE post_id = ${targetPost.id}
+					INNER JOIN posts ON posts.id = post_images.post_id
+					WHERE posts.author_id = ${targetUser.id}
 				`;
 
-				await tx`
-					UPDATE posts
-					SET
-						reply_to_post_id = ${currentPost.replyToPostId ?? null},
-						updated_at = NOW()
-					WHERE reply_to_post_id = ${targetPost.id}
-				`;
-
-				const [deletedPost] = await tx`
-					DELETE FROM posts
-					WHERE id = ${targetPost.id}
+				const [deletedUser] = await tx`
+					DELETE FROM "user"
+					WHERE id = ${targetUser.id}
 					RETURNING id
 				`;
 
-				if (!deletedPost) {
+				if (!deletedUser) {
 					return null;
 				}
 
+				const fileIds = new Set(imageRows.map((imageRow) => imageRow.fileId));
+				if (currentUser.avatarFileId) {
+					fileIds.add(currentUser.avatarFileId);
+				}
+				if (currentUser.bannerFileId) {
+					fileIds.add(currentUser.bannerFileId);
+				}
+
 				return {
-					id: targetPost.id,
-					fileIds: [...new Set(imageRows.map((imageRow) => imageRow.fileId))],
+					id: targetUser.id,
+					fileIds: [...fileIds],
 				};
 			});
 		} catch (error) {
 			if (
 				attempt < TRANSACTION_MAX_RETRIES - 1 &&
-				isRetryablePostDeleteError(error)
+				isRetryableUserDeleteError(error)
 			) {
 				continue;
 			}
@@ -338,7 +291,7 @@ const deleteSinglePost = async (sql, targetPost) => {
 		}
 	}
 
-	throw new Error("post deletion failed after retries");
+	throw new Error("user deletion failed after retries");
 };
 
 const deleteFileById = async (sql, r2Context, fileId) => {
@@ -407,13 +360,17 @@ const toObjectUrl = (baseUrl, bucket, key) => {
 	return new URL(objectPath, normalizedBaseUrl).toString();
 };
 
-const normalizeOptionalString = (value) => {
+const normalizeRequiredString = (value, optionName) => {
 	if (typeof value !== "string") {
-		return null;
+		throw new Error(`${optionName} is required`);
 	}
 
 	const normalized = value.trim();
-	return normalized ? normalized : null;
+	if (!normalized) {
+		throw new Error(`${optionName} is required`);
+	}
+
+	return normalized;
 };
 
 const parseOptionalPositiveInt = (value, optionName) => {
@@ -475,55 +432,46 @@ const escapeLikePattern = (value) => {
 };
 
 const printMatchSummary = (params) => {
-	const filters = [];
-	if (params.contains) {
-		filters.push(`contains=${JSON.stringify(params.contains)}`);
-	}
-	if (params.authorId) {
-		filters.push(`authorId=${JSON.stringify(params.authorId)}`);
-	}
-
-	console.log("Post deletion target preview");
+	console.log("User deletion target preview");
 	console.log(`- mode: ${params.apply ? "apply" : "dry-run"}`);
-	console.log(`- filters: ${filters.join(" AND ")}`);
+	console.log(`- filter: nameContains=${JSON.stringify(params.nameContains)}`);
 	if (params.limit) {
 		console.log(`- limit: ${params.limit}`);
 	}
 	console.log(`- concurrency: ${params.concurrency}`);
-	console.log(`- matched posts: ${params.targetPosts.length}`);
+	console.log(`- matched users: ${params.targetUsers.length}`);
 
-	if (params.targetPosts.length === 0) {
+	if (params.targetUsers.length === 0) {
 		return;
 	}
 
-	const previewLimit = 20;
-	const preview = params.targetPosts.slice(0, previewLimit);
 	console.log("- preview:");
-	for (const post of preview) {
+	for (const user of params.targetUsers.slice(0, PREVIEW_LIMIT)) {
 		const createdAt =
-			post.createdAt instanceof Date
-				? post.createdAt.toISOString()
-				: String(post.createdAt);
+			user.createdAt instanceof Date
+				? user.createdAt.toISOString()
+				: String(user.createdAt);
+		const handle = user.handle ?? "(none)";
 		console.log(
-			`  - ${post.id} | author=${post.authorId} | createdAt=${createdAt}`,
+			`  - ${user.id} | name=${JSON.stringify(user.name)} | handle=${handle} | createdAt=${createdAt}`,
 		);
 	}
 
-	if (params.targetPosts.length > previewLimit) {
-		console.log(`  - ...and ${params.targetPosts.length - previewLimit} more`);
+	if (params.targetUsers.length > PREVIEW_LIMIT) {
+		console.log(`  - ...and ${params.targetUsers.length - PREVIEW_LIMIT} more`);
 	}
 };
 
 const printDeleteSummary = (result) => {
 	console.log("\nDeletion completed");
-	console.log(`- deleted posts: ${result.deletedPostIds.length}`);
-	console.log(`- skipped posts: ${result.skippedPostIds.length}`);
-	console.log(`- failed posts: ${result.failedPostIds.length}`);
+	console.log(`- deleted users: ${result.deletedUserIds.length}`);
+	console.log(`- skipped users: ${result.skippedUserIds.length}`);
+	console.log(`- failed users: ${result.failedUserIds.length}`);
 	console.log(`- file cleanup failures: ${result.fileDeleteFailures}`);
 	console.log(`- file cleanup skipped: ${result.fileDeleteSkipped}`);
 
-	if (result.failedPostIds.length > 0) {
-		console.log(`- failed post ids: ${result.failedPostIds.join(", ")}`);
+	if (result.failedUserIds.length > 0) {
+		console.log(`- failed user ids: ${result.failedUserIds.join(", ")}`);
 	}
 };
 
@@ -535,7 +483,7 @@ const toErrorMessage = (error) => {
 	return String(error);
 };
 
-const isRetryablePostDeleteError = (error) => {
+const isRetryableUserDeleteError = (error) => {
 	if (!error || typeof error !== "object") {
 		return false;
 	}
