@@ -61,16 +61,20 @@ pnpm posts:delete -- --contains "spam" --author-id "user_123" --apply
 - `--concurrency` controls parallel workers for post and file deletion (default: 10)
 - when `--contains` and `--author-id` are both specified, matching is `AND`
 
-Delete users by name substring:
+Delete users by name substring and/or user id:
 
 ```bash
 pnpm users:delete -- --name-contains "spam"
+pnpm users:delete -- --user-id "user_123" --apply
+pnpm users:delete -- --name-contains "spam" --user-id "user_123"
 pnpm users:delete -- --name-contains "spam" --limit 1000 --concurrency 20 --apply
 ```
 
 - default is dry-run (no deletion)
 - add `--apply` to execute deletion
+- at least one of `--name-contains` or `--user-id` is required
 - `--name-contains` is case-insensitive (`ILIKE`)
+- when `--name-contains` and `--user-id` are both specified, matching is `AND`
 - `--concurrency` controls parallel workers for user and file deletion (default: 10)
 
 Ban or unban a user:

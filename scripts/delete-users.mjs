@@ -5,20 +5,23 @@ import { AwsClient } from "aws4fetch";
 import { config as loadEnv } from "dotenv";
 import postgres from "postgres";
 
-const HELP_TEXT = `Delete users by name substring.
+const HELP_TEXT = `Delete users by name substring and/or user id.
 
 Usage:
-  pnpm users:delete -- --name-contains "<text>" [--limit <n>] [--concurrency <n>] [--apply]
+  pnpm users:delete -- --name-contains "<text>" [--user-id "<id>"] [--limit <n>] [--concurrency <n>] [--apply]
+  pnpm users:delete -- --user-id "<id>" [--user-id "<id>"] [--limit <n>] [--concurrency <n>] [--apply]
 
 Options:
   --name-contains <text> Match users whose name includes <text> (case-insensitive)
+  --user-id <id>         Match users by exact id (repeatable)
   --limit <n>            Maximum number of matched users to process
   --concurrency <n>      Number of parallel workers (default: 10, max: 100)
   --apply                Execute deletion (default is dry-run)
   --help                 Show this help message
 
 Rules:
-  - --name-contains is required
+  - At least one of --name-contains or --user-id is required
+  - If both are specified, matching is AND
   - --concurrency applies to both user and file deletion
   - Without --apply, this command does not delete data
 `;
@@ -39,6 +42,7 @@ const main = async () => {
 		args,
 		options: {
 			"name-contains": { type: "string" },
+			"user-id": { type: "string", multiple: true },
 			limit: { type: "string" },
 			concurrency: { type: "string" },
 			apply: { type: "boolean", default: false },
@@ -53,13 +57,17 @@ const main = async () => {
 		return;
 	}
 
-	const nameContains = normalizeRequiredString(
-		values["name-contains"],
-		"--name-contains",
-	);
+	const nameContains = normalizeOptionalString(values["name-contains"]);
+	const userIds = normalizeUserIds(values["user-id"]);
 	const limit = parseOptionalPositiveInt(values.limit, "--limit");
 	const concurrency = resolveConcurrency(values.concurrency);
 	const apply = values.apply;
+
+	if (!nameContains && userIds.length === 0) {
+		throw new Error(
+			"Specify at least one filter: --name-contains or --user-id",
+		);
+	}
 
 	const databaseUrl = process.env.DATABASE_URL;
 	if (!databaseUrl) {
@@ -71,12 +79,14 @@ const main = async () => {
 	try {
 		const targetUsers = await loadTargetUsers(sql, {
 			nameContains,
+			userIds,
 			limit,
 		});
 
 		printMatchSummary({
 			targetUsers,
 			nameContains,
+			userIds,
 			limit,
 			concurrency,
 			apply,
@@ -117,7 +127,52 @@ const main = async () => {
 const loadTargetUsers = async (sql, filters) => {
 	const limitClause =
 		typeof filters.limit === "number" ? sql`LIMIT ${filters.limit}` : sql``;
-	const escapedContains = `%${escapeLikePattern(filters.nameContains)}%`;
+	const escapedContains = filters.nameContains
+		? `%${escapeLikePattern(filters.nameContains)}%`
+		: null;
+
+	if (escapedContains && filters.userIds.length > 0) {
+		return await sql`
+			SELECT
+				id,
+				name,
+				handle,
+				created_at AS "createdAt"
+			FROM "user"
+			WHERE name ILIKE ${escapedContains} ESCAPE '\\'
+				AND id IN ${sql(filters.userIds)}
+			ORDER BY created_at ASC
+			${limitClause}
+		`;
+	}
+
+	if (escapedContains) {
+		return await sql`
+			SELECT
+				id,
+				name,
+				handle,
+				created_at AS "createdAt"
+			FROM "user"
+			WHERE name ILIKE ${escapedContains} ESCAPE '\\'
+			ORDER BY created_at ASC
+			${limitClause}
+		`;
+	}
+
+	if (filters.userIds.length > 0) {
+		return await sql`
+			SELECT
+				id,
+				name,
+				handle,
+				created_at AS "createdAt"
+			FROM "user"
+			WHERE id IN ${sql(filters.userIds)}
+			ORDER BY created_at ASC
+			${limitClause}
+		`;
+	}
 
 	return await sql`
 		SELECT
@@ -126,7 +181,6 @@ const loadTargetUsers = async (sql, filters) => {
 			handle,
 			created_at AS "createdAt"
 		FROM "user"
-		WHERE name ILIKE ${escapedContains} ESCAPE '\\'
 		ORDER BY created_at ASC
 		${limitClause}
 	`;
@@ -360,14 +414,39 @@ const toObjectUrl = (baseUrl, bucket, key) => {
 	return new URL(objectPath, normalizedBaseUrl).toString();
 };
 
-const normalizeRequiredString = (value, optionName) => {
+const normalizeOptionalString = (value) => {
 	if (typeof value !== "string") {
-		throw new Error(`${optionName} is required`);
+		return null;
 	}
 
 	const normalized = value.trim();
-	if (!normalized) {
-		throw new Error(`${optionName} is required`);
+	return normalized || null;
+};
+
+const normalizeUserIds = (value) => {
+	if (value === undefined) {
+		return [];
+	}
+
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	const normalized = [];
+	const seen = new Set();
+
+	for (const rawUserId of value) {
+		if (typeof rawUserId !== "string") {
+			continue;
+		}
+
+		const userId = rawUserId.trim();
+		if (!userId || seen.has(userId)) {
+			continue;
+		}
+
+		seen.add(userId);
+		normalized.push(userId);
 	}
 
 	return normalized;
@@ -432,9 +511,17 @@ const escapeLikePattern = (value) => {
 };
 
 const printMatchSummary = (params) => {
+	const filters = [];
+	if (params.nameContains) {
+		filters.push(`nameContains=${JSON.stringify(params.nameContains)}`);
+	}
+	if (params.userIds.length > 0) {
+		filters.push(`userIds=${JSON.stringify(params.userIds)}`);
+	}
+
 	console.log("User deletion target preview");
 	console.log(`- mode: ${params.apply ? "apply" : "dry-run"}`);
-	console.log(`- filter: nameContains=${JSON.stringify(params.nameContains)}`);
+	console.log(`- filters: ${filters.join(" AND ")}`);
 	if (params.limit) {
 		console.log(`- limit: ${params.limit}`);
 	}
