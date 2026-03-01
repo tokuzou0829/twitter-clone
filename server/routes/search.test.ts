@@ -60,6 +60,41 @@ describe("/routes/search", () => {
 		).toBe(2);
 	});
 
+	it("ハッシュタグ検索は部分一致ではなくタグ一致でヒットする", async () => {
+		const user = await createUser();
+
+		await db.insert(schema.posts).values([
+			{
+				id: "search_exact_tag_post_a",
+				authorId: user.id,
+				content: "気分は #alice です",
+				createdAt: new Date("2026-01-02T09:59:00Z"),
+				updatedAt: new Date("2026-01-02T09:59:00Z"),
+			},
+			{
+				id: "search_exact_tag_post_b",
+				authorId: user.id,
+				content: "これは #aliceは政府の陰謀 です",
+				createdAt: new Date("2026-01-02T10:00:00Z"),
+				updatedAt: new Date("2026-01-02T10:00:00Z"),
+			},
+		]);
+
+		const response = await app.request("/?q=%23alice", {
+			method: "GET",
+		});
+		const json = (await response.json()) as {
+			posts: Array<{ id: string }>;
+			hashtags: Array<{ tag: string; count: number }>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(json.posts.map((post) => post.id)).toEqual([
+			"search_exact_tag_post_a",
+		]);
+		expect(json.hashtags).toEqual([{ tag: "#alice", count: 1 }]);
+	});
+
 	it("複数ハッシュタグを指定した検索ができる", async () => {
 		const user = await createUser();
 
