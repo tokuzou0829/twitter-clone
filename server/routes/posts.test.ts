@@ -184,6 +184,160 @@ describe("/routes/posts", () => {
 		expect(response.status).toBe(400);
 	});
 
+	it("短時間の連投は429で抑止される", async () => {
+		await createUser();
+
+		for (let index = 0; index < 8; index += 1) {
+			const formData = new FormData();
+			formData.set("content", `burst-${index}`);
+			const response = await app.request("/", {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "burst-blocked");
+		const blocked = await app.request("/", {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
+	it("同一内容の連投は429で抑止される", async () => {
+		await createUser();
+
+		for (let index = 0; index < 2; index += 1) {
+			const formData = new FormData();
+			formData.set("content", "same-content-spam");
+			const response = await app.request("/", {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "same-content-spam");
+		const blocked = await app.request("/", {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
+	it("返信エンドポイントも短時間連投で429になる", async () => {
+		await createUser();
+		const baseForm = new FormData();
+		baseForm.set("content", "reply target");
+		const baseRes = await app.request("/", { method: "POST", body: baseForm });
+		const base = (await baseRes.json()) as { post: { id: string } };
+
+		for (let index = 0; index < 8; index += 1) {
+			const formData = new FormData();
+			formData.set("content", `reply-burst-${index}`);
+			const response = await app.request(`/${base.post.id}/replies`, {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "reply-burst-blocked");
+		const blocked = await app.request(`/${base.post.id}/replies`, {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
+	it("返信エンドポイントも同一内容連投で429になる", async () => {
+		await createUser();
+		const baseForm = new FormData();
+		baseForm.set("content", "reply duplicate target");
+		const baseRes = await app.request("/", { method: "POST", body: baseForm });
+		const base = (await baseRes.json()) as { post: { id: string } };
+
+		for (let index = 0; index < 2; index += 1) {
+			const formData = new FormData();
+			formData.set("content", "same-reply-spam");
+			const response = await app.request(`/${base.post.id}/replies`, {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "same-reply-spam");
+		const blocked = await app.request(`/${base.post.id}/replies`, {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
+	it("引用エンドポイントも短時間連投で429になる", async () => {
+		await createUser();
+		const baseForm = new FormData();
+		baseForm.set("content", "quote target");
+		const baseRes = await app.request("/", { method: "POST", body: baseForm });
+		const base = (await baseRes.json()) as { post: { id: string } };
+
+		for (let index = 0; index < 8; index += 1) {
+			const formData = new FormData();
+			formData.set("content", `quote-burst-${index}`);
+			const response = await app.request(`/${base.post.id}/quotes`, {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "quote-burst-blocked");
+		const blocked = await app.request(`/${base.post.id}/quotes`, {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
+	it("引用エンドポイントも同一内容連投で429になる", async () => {
+		await createUser();
+		const baseForm = new FormData();
+		baseForm.set("content", "quote duplicate target");
+		const baseRes = await app.request("/", { method: "POST", body: baseForm });
+		const base = (await baseRes.json()) as { post: { id: string } };
+
+		for (let index = 0; index < 2; index += 1) {
+			const formData = new FormData();
+			formData.set("content", "same-quote-spam");
+			const response = await app.request(`/${base.post.id}/quotes`, {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "same-quote-spam");
+		const blocked = await app.request(`/${base.post.id}/quotes`, {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
 	it("投稿後にホームタイムラインへ表示される", async () => {
 		await createUser();
 		const formData = new FormData();

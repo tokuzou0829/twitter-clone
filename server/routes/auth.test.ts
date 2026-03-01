@@ -149,6 +149,42 @@ describe("/routes/auth", () => {
 			);
 		});
 
+		it("同一IPからのアカウント作成はレートリミットされる", async () => {
+			for (let index = 0; index < 5; index += 1) {
+				const response = await app.request("/api/auth/sign-up/email", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						origin: "http://localhost:3000",
+						"x-forwarded-for": "203.0.113.9",
+					},
+					body: JSON.stringify({
+						name: `RateLimit User ${index}`,
+						email: `signup-rate-${index}@example.com`,
+						password: "password1234",
+					}),
+				});
+
+				expect(response.status).toBe(200);
+			}
+
+			const blockedResponse = await app.request("/api/auth/sign-up/email", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					origin: "http://localhost:3000",
+					"x-forwarded-for": "203.0.113.9",
+				},
+				body: JSON.stringify({
+					name: "RateLimit User Blocked",
+					email: "signup-rate-blocked@example.com",
+					password: "password1234",
+				}),
+			});
+
+			expect(blockedResponse.status).toBe(429);
+		});
+
 		it("BAN済みユーザーはサインインできない", async () => {
 			const email = "banned-signin@example.com";
 			const password = "password1234";

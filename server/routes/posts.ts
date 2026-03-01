@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { uuidv7 } from "uuidv7";
 import { z } from "zod";
@@ -42,6 +42,10 @@ const postIdParamSchema = z.object({
 
 const MAX_POST_IMAGES = 4;
 const MAX_TIMELINE_REPLIES = 80;
+const SPAM_RATE_WINDOW_MS = 60 * 1000;
+const SPAM_RATE_MAX_POSTS = 8;
+const SPAM_DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+const SPAM_DUPLICATE_MAX_SAME_CONTENT = 2;
 
 const app = createHonoApp()
 	.get("/", zValidator("query", timelineQuerySchema), async (c) => {
@@ -126,17 +130,20 @@ const app = createHonoApp()
 		const mentions = await resolvePostMentions(db, payload.content);
 
 		const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-		const fileRepository = createFileRepository(client, db, baseUrl);
-		const post = await createPostWithImages({
-			db,
-			fileRepository,
-			bucketName,
-			publicUrl,
-			authorId: user.id,
-			content: payload.content,
-			links: payload.links,
-			images: payload.images,
-			mentions,
+		const post = await db.transaction(async (tx) => {
+			await assertPostSpamPolicy(tx, user.id, payload.content);
+			const fileRepository = createFileRepository(client, tx, baseUrl);
+			return createPostWithImages({
+				db: tx,
+				fileRepository,
+				bucketName,
+				publicUrl,
+				authorId: user.id,
+				content: payload.content,
+				links: payload.links,
+				images: payload.images,
+				mentions,
+			});
 		});
 
 		await createPostMentionNotifications({
@@ -163,18 +170,21 @@ const app = createHonoApp()
 			const mentions = await resolvePostMentions(db, payload.content);
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-			const fileRepository = createFileRepository(client, db, baseUrl);
-			const post = await createPostWithImages({
-				db,
-				fileRepository,
-				bucketName,
-				publicUrl,
-				authorId: user.id,
-				content: payload.content,
-				links: payload.links,
-				images: payload.images,
-				mentions,
-				replyToPostId: postId,
+			const post = await db.transaction(async (tx) => {
+				await assertPostSpamPolicy(tx, user.id, payload.content);
+				const fileRepository = createFileRepository(client, tx, baseUrl);
+				return createPostWithImages({
+					db: tx,
+					fileRepository,
+					bucketName,
+					publicUrl,
+					authorId: user.id,
+					content: payload.content,
+					links: payload.links,
+					images: payload.images,
+					mentions,
+					replyToPostId: postId,
+				});
 			});
 
 			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
@@ -212,18 +222,21 @@ const app = createHonoApp()
 			const mentions = await resolvePostMentions(db, payload.content);
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-			const fileRepository = createFileRepository(client, db, baseUrl);
-			const post = await createPostWithImages({
-				db,
-				fileRepository,
-				bucketName,
-				publicUrl,
-				authorId: user.id,
-				content: payload.content,
-				links: payload.links,
-				images: payload.images,
-				mentions,
-				quotePostId: postId,
+			const post = await db.transaction(async (tx) => {
+				await assertPostSpamPolicy(tx, user.id, payload.content);
+				const fileRepository = createFileRepository(client, tx, baseUrl);
+				return createPostWithImages({
+					db: tx,
+					fileRepository,
+					bucketName,
+					publicUrl,
+					authorId: user.id,
+					content: payload.content,
+					links: payload.links,
+					images: payload.images,
+					mentions,
+					quotePostId: postId,
+				});
 			});
 
 			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
@@ -406,6 +419,52 @@ const app = createHonoApp()
 	);
 
 export default app;
+
+const assertPostSpamPolicy = async (
+	db: Database,
+	authorId: string,
+	content: string | null,
+) => {
+	const rateWindowSince = new Date(Date.now() - SPAM_RATE_WINDOW_MS);
+	const [rateRow] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(schema.posts)
+		.where(
+			and(
+				eq(schema.posts.authorId, authorId),
+				gte(schema.posts.createdAt, rateWindowSince),
+			),
+		);
+
+	if (Number(rateRow?.count ?? 0) >= SPAM_RATE_MAX_POSTS) {
+		throw new HTTPException(429, {
+			message: "Too many posts in a short period. Please slow down.",
+		});
+	}
+
+	const normalizedContent = content?.trim().toLowerCase() ?? null;
+	if (!normalizedContent || normalizedContent.length < 8) {
+		return;
+	}
+
+	const duplicateWindowSince = new Date(Date.now() - SPAM_DUPLICATE_WINDOW_MS);
+	const [duplicateRow] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(schema.posts)
+		.where(
+			and(
+				eq(schema.posts.authorId, authorId),
+				sql`lower(trim(coalesce(${schema.posts.content}, ''))) = ${normalizedContent}`,
+				gte(schema.posts.createdAt, duplicateWindowSince),
+			),
+		);
+
+	if (Number(duplicateRow?.count ?? 0) >= SPAM_DUPLICATE_MAX_SAME_CONTENT) {
+		throw new HTTPException(429, {
+			message: "Duplicate posting detected. Please vary content.",
+		});
+	}
+};
 
 const parsePostFormData = (
 	formData: FormData,
