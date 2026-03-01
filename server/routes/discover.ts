@@ -5,7 +5,8 @@ import type { Database } from "@/lib/db";
 import { createHonoApp } from "../create-app";
 
 const TREND_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const TREND_SAMPLE_LIMIT = 500;
+const TREND_SAMPLE_BATCH_SIZE = 500;
+const TREND_MAX_SCAN_ROWS = 20000;
 const TREND_LIMIT = 8;
 const SUGGESTION_LIMIT = 4;
 const SUGGESTION_SAMPLE_LIMIT = 100;
@@ -46,35 +47,49 @@ const loadTrendsFromRecentPosts = async (
 	db: Database,
 ): Promise<TrendItem[]> => {
 	const since = new Date(Date.now() - TREND_LOOKBACK_MS);
-	const postRows = await db
-		.select({
-			content: schema.posts.content,
-		})
-		.from(schema.posts)
-		.where(
-			and(isNotNull(schema.posts.content), gte(schema.posts.createdAt, since)),
-		)
-		.orderBy(desc(schema.posts.createdAt))
-		.limit(TREND_SAMPLE_LIMIT);
-
 	const hashtagCounts = new Map<string, number>();
 
-	for (const postRow of postRows) {
-		if (!postRow.content) {
-			continue;
-		}
+	for (
+		let offset = 0;
+		offset < TREND_MAX_SCAN_ROWS;
+		offset += TREND_SAMPLE_BATCH_SIZE
+	) {
+		const postRows = await db
+			.select({
+				content: schema.posts.content,
+			})
+			.from(schema.posts)
+			.where(
+				and(
+					isNotNull(schema.posts.content),
+					gte(schema.posts.createdAt, since),
+				),
+			)
+			.orderBy(desc(schema.posts.createdAt))
+			.limit(TREND_SAMPLE_BATCH_SIZE)
+			.offset(offset);
 
-		for (const match of postRow.content.matchAll(HASHTAG_REGEX)) {
-			const rawTag = match[1]?.trim();
-			if (!rawTag) {
+		for (const postRow of postRows) {
+			if (!postRow.content) {
 				continue;
 			}
 
-			const normalizedTag = `#${rawTag.toLowerCase()}`;
-			hashtagCounts.set(
-				normalizedTag,
-				(hashtagCounts.get(normalizedTag) ?? 0) + 1,
-			);
+			for (const match of postRow.content.matchAll(HASHTAG_REGEX)) {
+				const rawTag = match[1]?.trim();
+				if (!rawTag) {
+					continue;
+				}
+
+				const normalizedTag = `#${rawTag.toLowerCase()}`;
+				hashtagCounts.set(
+					normalizedTag,
+					(hashtagCounts.get(normalizedTag) ?? 0) + 1,
+				);
+			}
+		}
+
+		if (postRows.length < TREND_SAMPLE_BATCH_SIZE) {
+			break;
 		}
 	}
 
