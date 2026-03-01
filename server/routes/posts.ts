@@ -127,21 +127,23 @@ const app = createHonoApp()
 		const db = c.get("db");
 		const formData = await c.req.formData();
 		const payload = parsePostFormData(formData, { allowEmpty: false });
-		await assertPostSpamPolicy(db, user.id, payload.content);
 		const mentions = await resolvePostMentions(db, payload.content);
 
 		const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-		const fileRepository = createFileRepository(client, db, baseUrl);
-		const post = await createPostWithImages({
-			db,
-			fileRepository,
-			bucketName,
-			publicUrl,
-			authorId: user.id,
-			content: payload.content,
-			links: payload.links,
-			images: payload.images,
-			mentions,
+		const post = await db.transaction(async (tx) => {
+			await assertPostSpamPolicy(tx, user.id, payload.content);
+			const fileRepository = createFileRepository(client, tx, baseUrl);
+			return createPostWithImages({
+				db: tx,
+				fileRepository,
+				bucketName,
+				publicUrl,
+				authorId: user.id,
+				content: payload.content,
+				links: payload.links,
+				images: payload.images,
+				mentions,
+			});
 		});
 
 		await createPostMentionNotifications({
@@ -165,22 +167,24 @@ const app = createHonoApp()
 
 			const formData = await c.req.formData();
 			const payload = parsePostFormData(formData, { allowEmpty: false });
-			await assertPostSpamPolicy(db, user.id, payload.content);
 			const mentions = await resolvePostMentions(db, payload.content);
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-			const fileRepository = createFileRepository(client, db, baseUrl);
-			const post = await createPostWithImages({
-				db,
-				fileRepository,
-				bucketName,
-				publicUrl,
-				authorId: user.id,
-				content: payload.content,
-				links: payload.links,
-				images: payload.images,
-				mentions,
-				replyToPostId: postId,
+			const post = await db.transaction(async (tx) => {
+				await assertPostSpamPolicy(tx, user.id, payload.content);
+				const fileRepository = createFileRepository(client, tx, baseUrl);
+				return createPostWithImages({
+					db: tx,
+					fileRepository,
+					bucketName,
+					publicUrl,
+					authorId: user.id,
+					content: payload.content,
+					links: payload.links,
+					images: payload.images,
+					mentions,
+					replyToPostId: postId,
+				});
 			});
 
 			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
@@ -215,22 +219,24 @@ const app = createHonoApp()
 
 			const formData = await c.req.formData();
 			const payload = parsePostFormData(formData, { allowEmpty: true });
-			await assertPostSpamPolicy(db, user.id, payload.content);
 			const mentions = await resolvePostMentions(db, payload.content);
 
 			const { client, baseUrl, bucketName, publicUrl } = c.get("r2");
-			const fileRepository = createFileRepository(client, db, baseUrl);
-			const post = await createPostWithImages({
-				db,
-				fileRepository,
-				bucketName,
-				publicUrl,
-				authorId: user.id,
-				content: payload.content,
-				links: payload.links,
-				images: payload.images,
-				mentions,
-				quotePostId: postId,
+			const post = await db.transaction(async (tx) => {
+				await assertPostSpamPolicy(tx, user.id, payload.content);
+				const fileRepository = createFileRepository(client, tx, baseUrl);
+				return createPostWithImages({
+					db: tx,
+					fileRepository,
+					bucketName,
+					publicUrl,
+					authorId: user.id,
+					content: payload.content,
+					links: payload.links,
+					images: payload.images,
+					mentions,
+					quotePostId: postId,
+				});
 			});
 
 			await createNotificationIfNeeded(db, c.get("r2").publicUrl, {
@@ -448,7 +454,7 @@ const assertPostSpamPolicy = async (
 		.where(
 			and(
 				eq(schema.posts.authorId, authorId),
-				eq(schema.posts.content, content),
+				sql`lower(trim(coalesce(${schema.posts.content}, ''))) = ${normalizedContent}`,
 				gte(schema.posts.createdAt, duplicateWindowSince),
 			),
 		);
