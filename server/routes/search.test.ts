@@ -67,20 +67,20 @@ describe("/routes/search", () => {
 			{
 				id: "search_exact_tag_post_a",
 				authorId: user.id,
-				content: "気分は #alice です",
+				content: "気分は #hana です",
 				createdAt: new Date("2026-01-02T09:59:00Z"),
 				updatedAt: new Date("2026-01-02T09:59:00Z"),
 			},
 			{
 				id: "search_exact_tag_post_b",
 				authorId: user.id,
-				content: "これは #aliceは政府の陰謀 です",
+				content: "これは #hanaは政府の陰謀 です",
 				createdAt: new Date("2026-01-02T10:00:00Z"),
 				updatedAt: new Date("2026-01-02T10:00:00Z"),
 			},
 		]);
 
-		const response = await app.request("/?q=%23alice", {
+		const response = await app.request("/?q=%23hana", {
 			method: "GET",
 		});
 		const json = (await response.json()) as {
@@ -92,7 +92,7 @@ describe("/routes/search", () => {
 		expect(json.posts.map((post) => post.id)).toEqual([
 			"search_exact_tag_post_a",
 		]);
-		expect(json.hashtags).toEqual([{ tag: "#alice", count: 1 }]);
+		expect(json.hashtags).toEqual([{ tag: "#hana", count: 1 }]);
 	});
 
 	it("複数ハッシュタグを指定した検索ができる", async () => {
@@ -165,17 +165,17 @@ describe("/routes/search", () => {
 	it("ユーザーを名前・ハンドルで検索できる", async () => {
 		await createUser();
 		await db.insert(schema.user).values({
-			id: "user_alice",
-			name: "Alice Smith",
-			handle: "alice",
-			email: "alice@example.com",
+			id: "user_hana",
+			name: "Hana Smith",
+			handle: "hana",
+			email: "hana@example.com",
 			emailVerified: true,
 			isBanned: false,
 			createdAt: new Date("2026-01-01"),
 			updatedAt: new Date("2026-01-01"),
 		});
 
-		const byName = await app.request("/?q=Alice", { method: "GET" });
+		const byName = await app.request("/?q=Hana", { method: "GET" });
 		const byNameJson = (await byName.json()) as {
 			query: string;
 			users: Array<{ id: string; name: string; handle: string | null }>;
@@ -183,18 +183,18 @@ describe("/routes/search", () => {
 		expect(byName.status).toBe(200);
 		expect(
 			byNameJson.users.some(
-				(u) => u.id === "user_alice" && u.name === "Alice Smith",
+				(u) => u.id === "user_hana" && u.name === "Hana Smith",
 			),
 		).toBe(true);
 
-		const byHandle = await app.request("/?q=alice", { method: "GET" });
+		const byHandle = await app.request("/?q=hana", { method: "GET" });
 		const byHandleJson = (await byHandle.json()) as {
 			users: Array<{ id: string; handle: string | null }>;
 		};
 		expect(byHandle.status).toBe(200);
 		expect(
 			byHandleJson.users.some(
-				(u) => u.id === "user_alice" && u.handle === "alice",
+				(u) => u.id === "user_hana" && u.handle === "hana",
 			),
 		).toBe(true);
 	});
@@ -203,10 +203,10 @@ describe("/routes/search", () => {
 		await createUser();
 		await db.insert(schema.user).values([
 			{
-				id: "mention_user_alice",
-				name: "Alice Mention",
-				handle: "alice_mention",
-				email: "mention-alice@example.com",
+				id: "mention_user_hana",
+				name: "Hana Mention",
+				handle: "hana_mention",
+				email: "mention-hana@example.com",
 				emailVerified: true,
 				isBanned: false,
 				createdAt: new Date("2026-01-01"),
@@ -225,7 +225,7 @@ describe("/routes/search", () => {
 			{
 				id: "mention_user_banned",
 				name: "Banned Mention",
-				handle: "alice_banned",
+				handle: "hana_banned",
 				email: "mention-banned@example.com",
 				emailVerified: true,
 				isBanned: true,
@@ -234,7 +234,7 @@ describe("/routes/search", () => {
 			},
 		]);
 
-		const response = await app.request("/mentions?q=alice", {
+		const response = await app.request("/mentions?q=hana", {
 			method: "GET",
 		});
 		const json = (await response.json()) as {
@@ -245,7 +245,7 @@ describe("/routes/search", () => {
 		expect(
 			json.users.some(
 				(user) =>
-					user.id === "mention_user_alice" && user.handle === "alice_mention",
+					user.id === "mention_user_hana" && user.handle === "hana_mention",
 			),
 		).toBe(true);
 		expect(json.users.some((user) => user.id === "mention_user_bob")).toBe(

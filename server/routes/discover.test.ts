@@ -7,34 +7,53 @@ import app from "./discover";
 const { createUser, db } = await setup();
 
 describe("/routes/discover", () => {
-	const fixedDate = new Date("2026-01-10T10:00:00.000Z");
-	const oldDate = new Date("2025-12-31T10:00:00.000Z");
+	const recentDate = () => new Date(Date.now() - 60 * 60 * 1000);
+	const expiredDate = () => new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
 
 	it("直近投稿のハッシュタグからトレンドを返す", async () => {
-		const userA = await createUser();
-		const userB = await createUser();
+		const createdAt = recentDate();
+		const staleCreatedAt = expiredDate();
+
+		await db.insert(schema.user).values([
+			{
+				id: "discover_trend_user_a",
+				name: "Discover Trend User A",
+				email: "discover-trend-user-a@example.com",
+				emailVerified: true,
+				createdAt,
+				updatedAt: createdAt,
+			},
+			{
+				id: "discover_trend_user_b",
+				name: "Discover Trend User B",
+				email: "discover-trend-user-b@example.com",
+				emailVerified: true,
+				createdAt,
+				updatedAt: createdAt,
+			},
+		]);
 
 		await db.insert(schema.posts).values([
 			{
 				id: "discover_post_1",
-				authorId: userA.id,
+				authorId: "discover_trend_user_a",
 				content: "Working with #NextJS and #TypeScript",
-				createdAt: fixedDate,
-				updatedAt: fixedDate,
+				createdAt,
+				updatedAt: createdAt,
 			},
 			{
 				id: "discover_post_2",
-				authorId: userB.id,
+				authorId: "discover_trend_user_b",
 				content: "Shipped feature using #nextjs",
-				createdAt: fixedDate,
-				updatedAt: fixedDate,
+				createdAt,
+				updatedAt: createdAt,
 			},
 			{
 				id: "discover_post_old",
-				authorId: userA.id,
+				authorId: "discover_trend_user_a",
 				content: "Old topic #legacy",
-				createdAt: oldDate,
-				updatedAt: oldDate,
+				createdAt: staleCreatedAt,
+				updatedAt: staleCreatedAt,
 			},
 		]);
 
@@ -51,24 +70,76 @@ describe("/routes/discover", () => {
 		expect(json.trends.some((trend) => trend.tag === "#legacy")).toBe(false);
 	});
 
-	it("トレンド集計は500件超を読みつつ、単一ユーザー連投を抑制する", async () => {
-		const userA = await createUser();
-		const userB = await createUser();
+	it("単一ユーザー投稿のハッシュタグもトレンドに含まれる", async () => {
+		const createdAt = recentDate();
+
+		await db.insert(schema.user).values({
+			id: "discover_single_author",
+			name: "Discover Single Author",
+			email: "discover-single-author@example.com",
+			emailVerified: true,
+			createdAt,
+			updatedAt: createdAt,
+		});
+
+		await db.insert(schema.posts).values({
+			id: "discover_single_author_post",
+			authorId: "discover_single_author",
+			content: "Single author tag #solotrend",
+			createdAt,
+			updatedAt: createdAt,
+		});
+
+		const response = await app.request("/", {
+			method: "GET",
+		});
+		const json = (await response.json()) as {
+			trends: Array<{ tag: string; count: number }>;
+		};
+
+		expect(response.status).toBe(200);
+		expect(json.trends.find((trend) => trend.tag === "#solotrend")?.count).toBe(
+			1,
+		);
+	});
+
+	it("トレンド集計は500件超を読みつつ、連投を逓減スコアで扱う", async () => {
+		const createdAt = recentDate();
+		const diverseAuthorCount = 20;
+
+		await db.insert(schema.user).values([
+			{
+				id: "discover_spam_author",
+				name: "Discover Spam Author",
+				email: "discover-spam-author@example.com",
+				emailVerified: true,
+				createdAt,
+				updatedAt: createdAt,
+			},
+			...Array.from({ length: diverseAuthorCount }, (_, index) => ({
+				id: `discover_diverse_author_${index}`,
+				name: `Discover Diverse Author ${index}`,
+				email: `discover-diverse-author-${index}@example.com`,
+				emailVerified: true,
+				createdAt,
+				updatedAt: createdAt,
+			})),
+		]);
 
 		await db.insert(schema.posts).values([
 			...Array.from({ length: 550 }, (_, index) => ({
-				id: `discover_post_many_a_${index}`,
-				authorId: userA.id,
-				content: "bulk #alice",
-				createdAt: fixedDate,
-				updatedAt: fixedDate,
+				id: `discover_post_many_single_author_${index}`,
+				authorId: "discover_spam_author",
+				content: "bulk #aurora",
+				createdAt,
+				updatedAt: createdAt,
 			})),
-			...Array.from({ length: 30 }, (_, index) => ({
-				id: `discover_post_many_b_${index}`,
-				authorId: userB.id,
-				content: "bulk #alice",
-				createdAt: fixedDate,
-				updatedAt: fixedDate,
+			...Array.from({ length: diverseAuthorCount }, (_, index) => ({
+				id: `discover_post_many_diverse_author_${index}`,
+				authorId: `discover_diverse_author_${index}`,
+				content: "bulk #horizon",
+				createdAt,
+				updatedAt: createdAt,
 			})),
 		]);
 
@@ -80,11 +151,28 @@ describe("/routes/discover", () => {
 		};
 
 		expect(response.status).toBe(200);
-		expect(json.trends.find((trend) => trend.tag === "#alice")?.count).toBe(10);
+		expect(json.trends.find((trend) => trend.tag === "#aurora")?.count).toBe(
+			550,
+		);
+		expect(json.trends.find((trend) => trend.tag === "#horizon")?.count).toBe(
+			diverseAuthorCount,
+		);
+
+		const horizonIndex = json.trends.findIndex(
+			(trend) => trend.tag === "#horizon",
+		);
+		const auroraIndex = json.trends.findIndex(
+			(trend) => trend.tag === "#aurora",
+		);
+
+		expect(horizonIndex).toBeGreaterThanOrEqual(0);
+		expect(auroraIndex).toBeGreaterThanOrEqual(0);
+		expect(horizonIndex).toBeLessThan(auroraIndex);
 	});
 
 	it("おすすめユーザーは自分とフォロー済みを除外する", async () => {
 		const currentUser = await createUser();
+		const createdAt = recentDate();
 
 		await db.insert(schema.user).values([
 			{
@@ -92,32 +180,32 @@ describe("/routes/discover", () => {
 				name: "Followed User",
 				email: "followed@example.com",
 				emailVerified: true,
-				createdAt: new Date("2026-01-01"),
-				updatedAt: new Date("2026-01-01"),
+				createdAt,
+				updatedAt: createdAt,
 			},
 			{
 				id: "discover_user_a",
 				name: "Suggested User A",
 				email: "suggested-a@example.com",
 				emailVerified: true,
-				createdAt: new Date("2026-01-02"),
-				updatedAt: new Date("2026-01-02"),
+				createdAt,
+				updatedAt: createdAt,
 			},
 			{
 				id: "discover_user_b",
 				name: "Suggested User B",
 				email: "suggested-b@example.com",
 				emailVerified: true,
-				createdAt: new Date("2026-01-03"),
-				updatedAt: new Date("2026-01-03"),
+				createdAt,
+				updatedAt: createdAt,
 			},
 			{
 				id: "discover_user_c",
 				name: "Suggested User C",
 				email: "suggested-c@example.com",
 				emailVerified: true,
-				createdAt: new Date("2026-01-04"),
-				updatedAt: new Date("2026-01-04"),
+				createdAt,
+				updatedAt: createdAt,
 			},
 		]);
 
@@ -125,7 +213,7 @@ describe("/routes/discover", () => {
 			id: "discover_follow_id",
 			followerId: currentUser.id,
 			followingId: "discover_user_followed",
-			createdAt: fixedDate,
+			createdAt,
 		});
 
 		const response = await app.request("/", {

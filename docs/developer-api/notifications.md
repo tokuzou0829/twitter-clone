@@ -84,8 +84,8 @@ Response:
     "actionUrl": "/posts/post_id",
     "actor": {
       "id": "actor_user_id",
-      "name": "Alice",
-      "handle": "alice",
+      "name": "Hana",
+      "handle": "hana",
       "image": null,
       "bio": null,
       "bannerImage": null

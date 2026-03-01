@@ -8,8 +8,7 @@ const TREND_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const TREND_SAMPLE_BATCH_SIZE = 500;
 const TREND_MAX_SCAN_ROWS = 20000;
 const TREND_LIMIT = 8;
-const TREND_MAX_CONTRIBUTION_PER_AUTHOR = 5;
-const TREND_MIN_UNIQUE_AUTHORS = 2;
+const TREND_MIN_UNIQUE_AUTHORS = 1;
 const SUGGESTION_LIMIT = 4;
 const SUGGESTION_SAMPLE_LIMIT = 100;
 const HASHTAG_REGEX = /(?:^|\s)#([\p{L}\p{N}_]{1,50})/gu;
@@ -21,6 +20,7 @@ type TrendItem = {
 
 type TrendAccumulator = {
 	total: number;
+	score: number;
 	authorCounts: Map<string, number>;
 };
 
@@ -94,16 +94,16 @@ const loadTrendsFromRecentPosts = async (
 			for (const normalizedTag of tagsInPost) {
 				const current = hashtagCounts.get(normalizedTag) ?? {
 					total: 0,
+					score: 0,
 					authorCounts: new Map<string, number>(),
 				};
 				const prevByAuthor = current.authorCounts.get(postRow.authorId) ?? 0;
-				if (prevByAuthor >= TREND_MAX_CONTRIBUTION_PER_AUTHOR) {
-					hashtagCounts.set(normalizedTag, current);
-					continue;
-				}
+				const nextByAuthor = prevByAuthor + 1;
 
 				current.total += 1;
-				current.authorCounts.set(postRow.authorId, prevByAuthor + 1);
+				current.authorCounts.set(postRow.authorId, nextByAuthor);
+				current.score +=
+					authorContribution(nextByAuthor) - authorContribution(prevByAuthor);
 				hashtagCounts.set(normalizedTag, current);
 			}
 		}
@@ -116,12 +116,16 @@ const loadTrendsFromRecentPosts = async (
 	return [...hashtagCounts.entries()]
 		.filter(([, value]) => value.authorCounts.size >= TREND_MIN_UNIQUE_AUTHORS)
 		.sort((a, b) => {
-			if (b[1].total !== a[1].total) {
-				return b[1].total - a[1].total;
+			if (b[1].score !== a[1].score) {
+				return b[1].score - a[1].score;
 			}
 
 			if (b[1].authorCounts.size !== a[1].authorCounts.size) {
 				return b[1].authorCounts.size - a[1].authorCounts.size;
+			}
+
+			if (b[1].total !== a[1].total) {
+				return b[1].total - a[1].total;
 			}
 
 			return a[0].localeCompare(b[0]);
@@ -132,6 +136,9 @@ const loadTrendsFromRecentPosts = async (
 			count: value.total,
 		}));
 };
+
+const authorContribution = (authorPostCount: number) =>
+	Math.log2(authorPostCount + 1);
 
 const loadSuggestedUsers = async (
 	db: Database,
