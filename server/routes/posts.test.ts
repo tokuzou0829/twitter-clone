@@ -184,6 +184,52 @@ describe("/routes/posts", () => {
 		expect(response.status).toBe(400);
 	});
 
+	it("短時間の連投は429で抑止される", async () => {
+		await createUser();
+
+		for (let index = 0; index < 8; index += 1) {
+			const formData = new FormData();
+			formData.set("content", `burst-${index}`);
+			const response = await app.request("/", {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "burst-blocked");
+		const blocked = await app.request("/", {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
+	it("同一内容の連投は429で抑止される", async () => {
+		await createUser();
+
+		for (let index = 0; index < 2; index += 1) {
+			const formData = new FormData();
+			formData.set("content", "same-content-spam");
+			const response = await app.request("/", {
+				method: "POST",
+				body: formData,
+			});
+			expect(response.status).toBe(201);
+		}
+
+		const blockedFormData = new FormData();
+		blockedFormData.set("content", "same-content-spam");
+		const blocked = await app.request("/", {
+			method: "POST",
+			body: blockedFormData,
+		});
+
+		expect(blocked.status).toBe(429);
+	});
+
 	it("投稿後にホームタイムラインへ表示される", async () => {
 		await createUser();
 		const formData = new FormData();
