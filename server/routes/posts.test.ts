@@ -232,15 +232,25 @@ describe("/routes/posts", () => {
 
 	it("返信エンドポイントも短時間連投で429になる", async () => {
 		await createUser();
-		const baseForm = new FormData();
-		baseForm.set("content", "reply target");
-		const baseRes = await app.request("/", { method: "POST", body: baseForm });
-		const base = (await baseRes.json()) as { post: { id: string } };
+
+		const replyTargetAuthorId = "reply_rate_target_author";
+		const replyTargetPostId = "reply_rate_target_post";
+
+		await db.insert(schema.user).values({
+			id: replyTargetAuthorId,
+			name: "Reply Rate Target",
+			email: "reply-rate-target@example.com",
+		});
+		await db.insert(schema.posts).values({
+			id: replyTargetPostId,
+			authorId: replyTargetAuthorId,
+			content: "reply target",
+		});
 
 		for (let index = 0; index < 8; index += 1) {
 			const formData = new FormData();
 			formData.set("content", `reply-burst-${index}`);
-			const response = await app.request(`/${base.post.id}/replies`, {
+			const response = await app.request(`/${replyTargetPostId}/replies`, {
 				method: "POST",
 				body: formData,
 			});
@@ -249,7 +259,7 @@ describe("/routes/posts", () => {
 
 		const blockedFormData = new FormData();
 		blockedFormData.set("content", "reply-burst-blocked");
-		const blocked = await app.request(`/${base.post.id}/replies`, {
+		const blocked = await app.request(`/${replyTargetPostId}/replies`, {
 			method: "POST",
 			body: blockedFormData,
 		});
@@ -286,15 +296,25 @@ describe("/routes/posts", () => {
 
 	it("引用エンドポイントも短時間連投で429になる", async () => {
 		await createUser();
-		const baseForm = new FormData();
-		baseForm.set("content", "quote target");
-		const baseRes = await app.request("/", { method: "POST", body: baseForm });
-		const base = (await baseRes.json()) as { post: { id: string } };
+
+		const quoteTargetAuthorId = "quote_rate_target_author";
+		const quoteTargetPostId = "quote_rate_target_post";
+
+		await db.insert(schema.user).values({
+			id: quoteTargetAuthorId,
+			name: "Quote Rate Target",
+			email: "quote-rate-target@example.com",
+		});
+		await db.insert(schema.posts).values({
+			id: quoteTargetPostId,
+			authorId: quoteTargetAuthorId,
+			content: "quote target",
+		});
 
 		for (let index = 0; index < 8; index += 1) {
 			const formData = new FormData();
 			formData.set("content", `quote-burst-${index}`);
-			const response = await app.request(`/${base.post.id}/quotes`, {
+			const response = await app.request(`/${quoteTargetPostId}/quotes`, {
 				method: "POST",
 				body: formData,
 			});
@@ -303,7 +323,7 @@ describe("/routes/posts", () => {
 
 		const blockedFormData = new FormData();
 		blockedFormData.set("content", "quote-burst-blocked");
-		const blocked = await app.request(`/${base.post.id}/quotes`, {
+		const blocked = await app.request(`/${quoteTargetPostId}/quotes`, {
 			method: "POST",
 			body: blockedFormData,
 		});

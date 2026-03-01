@@ -4,9 +4,9 @@ import * as schema from "@/db/schema";
 import { createAutoUserHandleFromUserId } from "@/lib/user-handle";
 import type { BlobFile, FileId, UploadedFile } from "@/server/objects/file";
 import { setup } from "@/tests/vitest.helper";
-import app from "./auth";
 
 const { createUser, db } = await setup();
+const { app } = await import("@/server/hono-app");
 const { saveBlobFile } = vi.hoisted(() => ({
 	saveBlobFile: vi.fn(),
 }));
@@ -28,7 +28,7 @@ describe("/routes/auth", () => {
 			});
 		});
 		it("未ログイン時はAPIに到達できない", async () => {
-			const response = await app.request("/secure-message", {
+			const response = await app.request("/api/auth/secure-message", {
 				method: "POST",
 				body: JSON.stringify({ message: "Hello, World!" }),
 				headers: { "Content-Type": "application/json" },
@@ -56,7 +56,7 @@ describe("/routes/auth", () => {
 
 			saveBlobFile.mockResolvedValueOnce(fakeSavedFile);
 
-			const res = await app.request("/secure-message", {
+			const res = await app.request("/api/auth/secure-message", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ message: "hello" }),
@@ -81,7 +81,7 @@ describe("/routes/auth", () => {
 	});
 	describe("GET /me", () => {
 		it("未ログイン時はAPIに到達できない", async () => {
-			const response = await app.request("/me", {
+			const response = await app.request("/api/auth/me", {
 				method: "GET",
 			});
 			const json = await response.json();
@@ -94,7 +94,7 @@ describe("/routes/auth", () => {
 		});
 		it("ログイン時はユーザー情報を取得できる", async () => {
 			await createUser();
-			const response = await app.request("/me", {
+			const response = await app.request("/api/auth/me", {
 				method: "GET",
 			});
 			const json = (await response.json()) as {
