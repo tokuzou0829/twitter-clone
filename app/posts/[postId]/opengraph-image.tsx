@@ -62,6 +62,13 @@ const containsArabic = (value: string | null | undefined): boolean => {
 	);
 };
 
+const containsRtl = (value: string | null | undefined): boolean => {
+	if (!value) return false;
+	return /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(
+		value,
+	);
+};
+
 const resolveOgFonts = async (texts: Array<string | null | undefined>) => {
 	if (!texts.some((text) => containsArabic(text))) {
 		return undefined;
@@ -89,6 +96,54 @@ const createImageResponseSafe = async (
 		});
 	}
 };
+
+const renderRtlFallbackCard = () => (
+	<div
+		style={{
+			display: "flex",
+			width: "100%",
+			height: "100%",
+			background:
+				"linear-gradient(135deg, #0f172a 0%, #1e1b4b 45%, #312e81 100%)",
+			padding: 30,
+		}}
+	>
+		<div
+			style={{
+				display: "flex",
+				width: "100%",
+				height: "100%",
+				borderRadius: 28,
+				border: "2px solid rgba(255,255,255,0.25)",
+				backgroundColor: "rgba(15,23,42,0.65)",
+				alignItems: "center",
+				justifyContent: "center",
+				color: "#ffffff",
+			}}
+		>
+			<div
+				style={{
+					display: "flex",
+					flexDirection: "column",
+					alignItems: "center",
+				}}
+			>
+				<div style={{ display: "flex", fontSize: 170, lineHeight: 1 }}>💩</div>
+				<div
+					style={{
+						display: "flex",
+						marginTop: 12,
+						fontSize: 34,
+						fontWeight: 700,
+						letterSpacing: 0.5,
+					}}
+				>
+					RTL preview fallback
+				</div>
+			</div>
+		</div>
+	</div>
+);
 
 export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const { postId } = await params;
@@ -133,6 +188,16 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const postText = postTextSource
 		? truncateText(postTextSource, CARD_TEXT_MAX_LENGTH)
 		: null;
+	const textsForDetection = [
+		post.author.name,
+		payload.handle,
+		postContent,
+		quoteContent,
+		postText,
+	];
+	if (textsForDetection.some((text) => containsRtl(text))) {
+		return createImageResponseSafe(renderRtlFallbackCard(), []);
+	}
 
 	return createImageResponseSafe(
 		<div
@@ -252,7 +317,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 				) : null}
 			</div>
 		</div>,
-		[post.author.name, payload.handle, postContent, quoteContent, postText],
+		textsForDetection,
 	);
 }
 
