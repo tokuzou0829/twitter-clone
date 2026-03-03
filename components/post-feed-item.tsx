@@ -2,6 +2,7 @@
 
 import {
 	Heart,
+	Languages,
 	MessageCircle,
 	MoreHorizontal,
 	Quote as QuoteIcon,
@@ -64,6 +65,11 @@ const NODE_DOT_SIZE = 8;
 const MIN_SINGLE_IMAGE_ASPECT_RATIO = 0.75;
 const MAX_SINGLE_IMAGE_ASPECT_RATIO = 1.91;
 const DEFAULT_SINGLE_IMAGE_ASPECT_RATIO = 1;
+const TRANSLATE_BASE_URL = "https://translate.evex.land/";
+const JAPANESE_CHAR_PATTERN =
+	/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]/u;
+const ENGLISH_CHAR_PATTERN =
+	/^[\p{Script=Latin}\p{Number}\p{Punctuation}\p{Separator}\p{Symbol}]+$/u;
 
 export function PostFeedItem({
 	post,
@@ -223,6 +229,14 @@ export function PostFeedItem({
 			singleImageAspectRatios[imageId] ?? DEFAULT_SINGLE_IMAGE_ASPECT_RATIO
 		);
 	};
+
+	const translationTargetContent = (post.content ?? "").trim();
+	const shouldShowTranslateButton =
+		translationTargetContent.length > 0 &&
+		!JAPANESE_CHAR_PATTERN.test(translationTargetContent);
+	const translateUrl = shouldShowTranslateButton
+		? buildTranslateUrl(translationTargetContent)
+		: null;
 
 	return (
 		<article
@@ -597,6 +611,20 @@ export function PostFeedItem({
 							}
 							icon={<Heart className="h-[18px] w-[18px]" />}
 						/>
+						{translateUrl ? (
+							<a
+								href={translateUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								onClick={(event) => event.stopPropagation()}
+								className="group inline-flex items-center gap-1 rounded-full px-2 py-1 text-[13px] text-[var(--text-subtle)] transition hover:text-sky-600"
+								aria-label="Translate post"
+								title="Translate"
+							>
+								<Languages className="h-4 w-4" />
+								<span className="hidden sm:inline">Translate</span>
+							</a>
+						) : null}
 						<PostShareButton postId={post.id} updatedAt={post.updatedAt} />
 					</div>
 				</div>
@@ -763,4 +791,17 @@ function clampSingleImageAspectRatio(ratio: number) {
 		MAX_SINGLE_IMAGE_ASPECT_RATIO,
 		Math.max(MIN_SINGLE_IMAGE_ASPECT_RATIO, ratio),
 	);
+}
+
+function buildTranslateUrl(content: string) {
+	const query = new URLSearchParams({
+		content,
+		target: "ja",
+	});
+
+	if (ENGLISH_CHAR_PATTERN.test(content)) {
+		query.set("from", "en");
+	}
+
+	return `${TRANSLATE_BASE_URL}?${query.toString()}`;
 }
