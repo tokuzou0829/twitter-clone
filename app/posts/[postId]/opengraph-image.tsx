@@ -44,6 +44,10 @@ const POOP_QUOTES = [
 	"詰まったら、水を飲んで深呼吸。",
 	"人生の重みは、だいたい腸から来る。",
 	"今日の運勢: うんを味方につけろ。",
+	"出る日は正義、出ない日は戦略。",
+	"焦るな、腸は気分屋。",
+	"いいアイデアはトイレで生まれる。",
+	"流した後こそ、心は軽い。",
 ];
 
 const pickPoopQuote = () =>
@@ -95,7 +99,7 @@ const renderRtlFallbackCard = () => {
 							color: "#13223b",
 						}}
 					>
-						RTL preview fallback
+						この投稿はプレビューできません。
 					</div>
 					<div
 						style={{
