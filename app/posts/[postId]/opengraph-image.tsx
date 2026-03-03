@@ -97,53 +97,84 @@ const createImageResponseSafe = async (
 	}
 };
 
-const renderRtlFallbackCard = () => (
-	<div
-		style={{
-			display: "flex",
-			width: "100%",
-			height: "100%",
-			background:
-				"linear-gradient(135deg, #0f172a 0%, #1e1b4b 45%, #312e81 100%)",
-			padding: 30,
-		}}
-	>
+const POOP_QUOTES = [
+	"うんこは急がず、流れに乗る。",
+	"つらい日は、いったん出して寝る。",
+	"完璧より快便。",
+	"詰まったら、水を飲んで深呼吸。",
+	"人生の重みは、だいたい腸から来る。",
+	"今日の運勢: うんを味方につけろ。",
+];
+
+const pickPoopQuote = () =>
+	POOP_QUOTES[Math.floor(Math.random() * POOP_QUOTES.length)] ?? POOP_QUOTES[0];
+
+const renderRtlFallbackCard = () => {
+	const quote = pickPoopQuote();
+	return (
 		<div
 			style={{
 				display: "flex",
 				width: "100%",
 				height: "100%",
-				borderRadius: 28,
-				border: "2px solid rgba(255,255,255,0.25)",
-				backgroundColor: "rgba(15,23,42,0.65)",
-				alignItems: "center",
-				justifyContent: "center",
-				color: "#ffffff",
+				backgroundColor: "#ecf3ff",
+				padding: 24,
 			}}
 		>
 			<div
 				style={{
 					display: "flex",
-					flexDirection: "column",
+					width: "100%",
+					height: "100%",
+					borderRadius: 26,
+					backgroundColor: "#ffffff",
+					border: "2px solid #d8e5ff",
 					alignItems: "center",
+					justifyContent: "center",
+					color: "#1a2740",
 				}}
 			>
-				<div style={{ display: "flex", fontSize: 170, lineHeight: 1 }}>💩</div>
 				<div
 					style={{
 						display: "flex",
-						marginTop: 12,
-						fontSize: 34,
-						fontWeight: 700,
-						letterSpacing: 0.5,
+						flexDirection: "column",
+						alignItems: "center",
+						maxWidth: 920,
+						padding: "0 24px",
 					}}
 				>
-					RTL preview fallback
+					<div style={{ display: "flex", fontSize: 170, lineHeight: 1 }}>
+						💩
+					</div>
+					<div
+						style={{
+							display: "flex",
+							marginTop: 8,
+							fontSize: 30,
+							fontWeight: 700,
+							color: "#13223b",
+						}}
+					>
+						RTL preview fallback
+					</div>
+					<div
+						style={{
+							display: "flex",
+							marginTop: 12,
+							fontSize: 26,
+							lineHeight: 1.4,
+							fontWeight: 500,
+							color: "#334155",
+							textAlign: "center",
+						}}
+					>
+						{quote}
+					</div>
 				</div>
 			</div>
 		</div>
-	</div>
-);
+	);
+};
 
 export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const { postId } = await params;
