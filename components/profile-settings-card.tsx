@@ -3,7 +3,11 @@
 import { Camera, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
-
+import {
+	disableTotp,
+	enableTotp,
+	verifyTotpEnrollment,
+} from "@/lib/auth-actions";
 import { authClient } from "@/lib/auth-client";
 import {
 	fetchMyProfile,
@@ -37,6 +41,13 @@ export function ProfileSettingsCard({ onSaved }: ProfileSettingsCardProps) {
 	const [isLoading, setIsLoading] = useState(true);
 	const [isSaving, setIsSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [isTwoFactorEnabled, setIsTwoFactorEnabled] = useState(false);
+	const [twoFactorPassword, setTwoFactorPassword] = useState("");
+	const [totpUri, setTotpUri] = useState<string | null>(null);
+	const [backupCodes, setBackupCodes] = useState<string[]>([]);
+	const [totpCode, setTotpCode] = useState("");
+	const [twoFactorMessage, setTwoFactorMessage] = useState<string | null>(null);
+	const [isTwoFactorBusy, setIsTwoFactorBusy] = useState(false);
 
 	useEffect(() => {
 		if (!session?.user) {
@@ -59,6 +70,11 @@ export function ProfileSettingsCard({ onSaved }: ProfileSettingsCardProps) {
 				setName(nextProfile.user.name);
 				setHandle(nextProfile.user.handle ?? "");
 				setBio(nextProfile.user.bio ?? "");
+				setIsTwoFactorEnabled(
+					Boolean(
+						(session.user as { twoFactorEnabled?: boolean }).twoFactorEnabled,
+					),
+				);
 			} catch (loadError) {
 				if (ignore) {
 					return;
@@ -76,6 +92,7 @@ export function ProfileSettingsCard({ onSaved }: ProfileSettingsCardProps) {
 		};
 
 		void load();
+
 		return () => {
 			ignore = true;
 		};
@@ -122,6 +139,77 @@ export function ProfileSettingsCard({ onSaved }: ProfileSettingsCardProps) {
 		Boolean(bannerFile) ||
 		removeAvatar ||
 		removeBanner;
+
+	const handleEnableTotp = async () => {
+		if (!twoFactorPassword.trim()) {
+			setTwoFactorMessage("TOTP有効化にはパスワードが必要です");
+			return;
+		}
+
+		setIsTwoFactorBusy(true);
+		setTwoFactorMessage(null);
+		const result = await enableTotp({
+			password: twoFactorPassword,
+			issuer: "Numatter",
+		});
+		if (!result.success) {
+			setTwoFactorMessage(result.error ?? "TOTPの初期化に失敗しました");
+			setIsTwoFactorBusy(false);
+			return;
+		}
+
+		setTotpUri(result.totpURI ?? null);
+		setBackupCodes(result.backupCodes ?? []);
+		setTwoFactorMessage(
+			"認証アプリでQR(URI)を追加し、コードを入力してください",
+		);
+		setIsTwoFactorBusy(false);
+	};
+
+	const handleVerifyTotpEnrollment = async () => {
+		if (!totpCode.trim()) {
+			setTwoFactorMessage("6桁コードを入力してください");
+			return;
+		}
+
+		setIsTwoFactorBusy(true);
+		setTwoFactorMessage(null);
+		const result = await verifyTotpEnrollment(totpCode.trim());
+		if (!result.success) {
+			setTwoFactorMessage(result.error ?? "コード検証に失敗しました");
+			setIsTwoFactorBusy(false);
+			return;
+		}
+
+		setIsTwoFactorEnabled(true);
+		setTotpUri(null);
+		setTotpCode("");
+		setTwoFactorMessage("TOTPを有効化しました");
+		setIsTwoFactorBusy(false);
+	};
+
+	const handleDisableTotp = async () => {
+		if (!twoFactorPassword.trim()) {
+			setTwoFactorMessage("無効化にもパスワードが必要です");
+			return;
+		}
+
+		setIsTwoFactorBusy(true);
+		setTwoFactorMessage(null);
+		const result = await disableTotp(twoFactorPassword);
+		if (!result.success) {
+			setTwoFactorMessage(result.error ?? "TOTP無効化に失敗しました");
+			setIsTwoFactorBusy(false);
+			return;
+		}
+
+		setIsTwoFactorEnabled(false);
+		setTotpUri(null);
+		setBackupCodes([]);
+		setTotpCode("");
+		setTwoFactorMessage("TOTPを無効化しました");
+		setIsTwoFactorBusy(false);
+	};
 
 	if (isPending || isLoading) {
 		return (
@@ -371,6 +459,99 @@ export function ProfileSettingsCard({ onSaved }: ProfileSettingsCardProps) {
 							{bio.length}/160
 						</span>
 					</label>
+				</div>
+
+				<div className="mt-6 space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-4 py-4">
+					<p className="text-sm font-bold text-[var(--text-main)]">
+						二段階認証 (TOTP)
+					</p>
+					<p className="text-xs text-[var(--text-subtle)]">
+						現在: {isTwoFactorEnabled ? "有効" : "無効"}
+					</p>
+					<label className="block space-y-1">
+						<span className="text-xs font-bold text-[var(--text-subtle)]">
+							確認用パスワード
+						</span>
+						<input
+							type="password"
+							value={twoFactorPassword}
+							onChange={(event) => setTwoFactorPassword(event.target.value)}
+							className="h-10 w-full rounded-xl border border-[var(--border-subtle)] bg-white px-3 text-sm text-[var(--text-main)] outline-none transition focus:border-sky-400"
+						/>
+					</label>
+
+					{totpUri ? (
+						<div className="space-y-2 rounded-xl border border-dashed border-[var(--border-subtle)] bg-white p-3">
+							<p className="text-xs text-[var(--text-subtle)]">
+								認証アプリに次のURIを登録してください:
+							</p>
+							<p className="break-all text-xs text-[var(--text-main)]">
+								{totpUri}
+							</p>
+							<input
+								inputMode="numeric"
+								placeholder="6桁コード"
+								value={totpCode}
+								onChange={(event) =>
+									setTotpCode(event.target.value.replace(/\D/g, "").slice(0, 8))
+								}
+								className="h-10 w-full rounded-xl border border-[var(--border-subtle)] px-3 text-sm text-[var(--text-main)] outline-none transition focus:border-sky-400"
+							/>
+							<button
+								type="button"
+								onClick={() => {
+									void handleVerifyTotpEnrollment();
+								}}
+								disabled={isTwoFactorBusy}
+								className="rounded-full bg-[var(--brand-primary)] px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
+							>
+								コードを検証
+							</button>
+						</div>
+					) : null}
+
+					{backupCodes.length > 0 ? (
+						<div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+							<p className="text-xs font-semibold text-amber-800">
+								バックアップコード (安全な場所に保存)
+							</p>
+							<p className="mt-1 break-all text-xs text-amber-900">
+								{backupCodes.join(", ")}
+							</p>
+						</div>
+					) : null}
+
+					<div className="flex gap-2">
+						{!isTwoFactorEnabled ? (
+							<button
+								type="button"
+								onClick={() => {
+									void handleEnableTotp();
+								}}
+								disabled={isTwoFactorBusy}
+								className="rounded-full border border-[var(--border-subtle)] bg-white px-4 py-2 text-xs font-bold text-[var(--text-main)] disabled:opacity-60"
+							>
+								有効化を開始
+							</button>
+						) : (
+							<button
+								type="button"
+								onClick={() => {
+									void handleDisableTotp();
+								}}
+								disabled={isTwoFactorBusy}
+								className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 disabled:opacity-60"
+							>
+								無効化
+							</button>
+						)}
+					</div>
+
+					{twoFactorMessage ? (
+						<p className="text-xs text-[var(--text-subtle)]">
+							{twoFactorMessage}
+						</p>
+					) : null}
 				</div>
 
 				<div className="sticky bottom-0 z-10 mt-5 border-t border-[var(--border-subtle)] bg-white/95 px-4 py-3 backdrop-blur">
