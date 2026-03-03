@@ -2,6 +2,7 @@
 
 import {
 	Heart,
+	Languages,
 	MessageCircle,
 	MoreHorizontal,
 	Quote as QuoteIcon,
@@ -19,7 +20,11 @@ import {
 	useState,
 } from "react";
 
-import type { PostSummary, UserSummary } from "@/lib/social-api";
+import {
+	type PostSummary,
+	translatePostText,
+	type UserSummary,
+} from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { LinkPreviewCard } from "./link-preview-card";
 import { renderPostContent } from "./post-content-text";
@@ -64,6 +69,10 @@ const NODE_DOT_SIZE = 8;
 const MIN_SINGLE_IMAGE_ASPECT_RATIO = 0.75;
 const MAX_SINGLE_IMAGE_ASPECT_RATIO = 1.91;
 const DEFAULT_SINGLE_IMAGE_ASPECT_RATIO = 1;
+const JAPANESE_CHAR_PATTERN =
+	/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]/u;
+const ENGLISH_CHAR_PATTERN =
+	/^[\p{Script=Latin}\p{Number}\p{Punctuation}\p{Separator}\p{Symbol}]+$/u;
 
 export function PostFeedItem({
 	post,
@@ -91,6 +100,15 @@ export function PostFeedItem({
 	const [singleImageAspectRatios, setSingleImageAspectRatios] = useState<
 		Record<string, number>
 	>({});
+	const [originalContentState] = useState<string | null>(post.content ?? null);
+	const [translatedContent, setTranslatedContent] = useState<string | null>(
+		null,
+	);
+	const [translationMode, setTranslationMode] = useState<
+		"original" | "translated"
+	>("original");
+	const [isTranslating, setIsTranslating] = useState(false);
+	const [translateError, setTranslateError] = useState<string | null>(null);
 	const postPath = `/posts/${post.id}`;
 	const displayDate = createdAt ?? post.createdAt;
 	const threadLevel = thread?.level ?? 0;
@@ -222,6 +240,54 @@ export function PostFeedItem({
 		return (
 			singleImageAspectRatios[imageId] ?? DEFAULT_SINGLE_IMAGE_ASPECT_RATIO
 		);
+	};
+
+	const normalizedOriginalContent = (originalContentState ?? "").trim();
+	const shouldShowTranslateButton =
+		normalizedOriginalContent.length > 0 &&
+		!JAPANESE_CHAR_PATTERN.test(normalizedOriginalContent);
+	const displayContent =
+		translationMode === "translated" && translatedContent
+			? translatedContent
+			: originalContentState;
+
+	const handleTranslateToggle = async () => {
+		if (
+			!shouldShowTranslateButton ||
+			isTranslating ||
+			!normalizedOriginalContent
+		) {
+			return;
+		}
+
+		if (translationMode === "translated") {
+			setTranslationMode("original");
+			return;
+		}
+
+		if (translatedContent) {
+			setTranslationMode("translated");
+			return;
+		}
+
+		setIsTranslating(true);
+		setTranslateError(null);
+
+		try {
+			const result = await translatePostText({
+				postId: post.id,
+				target: "ja",
+				...(ENGLISH_CHAR_PATTERN.test(normalizedOriginalContent)
+					? { from: "en" }
+					: {}),
+			});
+			setTranslatedContent(result.translated);
+			setTranslationMode("translated");
+		} catch {
+			setTranslateError("翻訳に失敗しました");
+		} finally {
+			setIsTranslating(false);
+		}
 	};
 
 	return (
@@ -395,10 +461,38 @@ export function PostFeedItem({
 						</p>
 					) : null}
 
-					{post.content ? (
+					{shouldShowTranslateButton ? (
+						<button
+							type="button"
+							onClick={(event) => {
+								event.stopPropagation();
+								void handleTranslateToggle();
+							}}
+							disabled={isTranslating}
+							className="mt-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
+						>
+							<Languages className="h-3 w-3" />
+							<span>
+								{isTranslating
+									? "翻訳中..."
+									: translationMode === "translated"
+										? "原文に戻す"
+										: translatedContent
+											? "翻訳を見る"
+											: "翻訳する"}
+							</span>
+						</button>
+					) : null}
+
+					{displayContent ? (
 						<p className="mt-2 whitespace-pre-wrap text-[15px] leading-6 text-[var(--text-main)] break-all">
-							{renderPostContent(post.content, post.mentions)}
+							{translationMode === "translated" && translatedContent
+								? translatedContent
+								: renderPostContent(displayContent, post.mentions)}
 						</p>
+					) : null}
+					{translateError ? (
+						<p className="mt-1 text-xs text-rose-500">{translateError}</p>
 					) : null}
 
 					{primaryLink ? <LinkPreviewCard link={primaryLink} /> : null}
