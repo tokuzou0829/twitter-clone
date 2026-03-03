@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
+import type { ReactElement } from "react";
 
 import { buildPostOgPayload, fetchPostForOg, toAbsoluteUrl } from "./post-og";
 
@@ -72,14 +73,29 @@ const resolveOgFonts = async (texts: Array<string | null | undefined>) => {
 	}
 };
 
+const createImageResponseSafe = async (
+	node: ReactElement,
+	texts: Array<string | null | undefined>,
+) => {
+	const fonts = await resolveOgFonts(texts);
+	try {
+		return new ImageResponse(node, {
+			...size,
+			...(fonts ? { fonts } : {}),
+		});
+	} catch {
+		return new ImageResponse(node, {
+			...size,
+		});
+	}
+};
+
 export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const { postId } = await params;
 	const post = await fetchPostForOg(postId);
 
-	const fallbackFonts = await resolveOgFonts([post?.content]);
-
 	if (!post) {
-		return new ImageResponse(
+		return createImageResponseSafe(
 			<div
 				style={{
 					display: "flex",
@@ -102,10 +118,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 					}}
 				/>
 			</div>,
-			{
-				...size,
-				...(fallbackFonts ? { fonts: fallbackFonts } : {}),
-			},
+			[],
 		);
 	}
 
@@ -120,15 +133,8 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const postText = postTextSource
 		? truncateText(postTextSource, CARD_TEXT_MAX_LENGTH)
 		: null;
-	const ogFonts = await resolveOgFonts([
-		post.author.name,
-		payload.handle,
-		postContent,
-		quoteContent,
-		postText,
-	]);
 
-	return new ImageResponse(
+	return createImageResponseSafe(
 		<div
 			style={{
 				display: "flex",
@@ -246,10 +252,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 				) : null}
 			</div>
 		</div>,
-		{
-			...size,
-			...(ogFonts ? { fonts: ogFonts } : {}),
-		},
+		[post.author.name, payload.handle, postContent, quoteContent, postText],
 	);
 }
 
