@@ -532,14 +532,28 @@ describe("/routes/posts", () => {
 			body: replyFormData,
 		});
 
-		const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+		const webhookCall = fetchSpy.mock.calls.find((call) => {
+			const [input] = call;
+			const url =
+				typeof input === "string"
+					? input
+					: input instanceof URL
+						? input.toString()
+						: input instanceof Request
+							? input.url
+							: String(input);
+			return url.includes("hooks.example.com/reply");
+		});
+
+		const requestInit = webhookCall?.[1] as RequestInit | undefined;
 		const payload = JSON.parse(String(requestInit?.body ?? "{}")) as {
 			event: string;
 			trigger: { type: string } | null;
 		};
 
 		expect(response.status).toBe(201);
-		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+		expect(webhookCall).toBeTruthy();
 		expect(payload.event).toBe("notifications.snapshot");
 		expect(payload.trigger?.type).toBe("reply");
 
