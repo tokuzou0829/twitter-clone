@@ -1,4 +1,7 @@
 /* biome-ignore-all lint/performance/noImgElement: next/og image rendering requires img tags. */
+
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { ImageResponse } from "next/og";
 
 import { buildPostOgPayload, fetchPostForOg, toAbsoluteUrl } from "./post-og";
@@ -9,6 +12,7 @@ export const size = {
 	height: 630,
 };
 export const contentType = "image/png";
+export const runtime = "nodejs";
 
 type OpenGraphImageProps = {
 	params: Promise<{ postId: string }>;
@@ -16,17 +20,19 @@ type OpenGraphImageProps = {
 
 const CARD_TEXT_MAX_LENGTH = 180;
 
-const arabicFontDataPromise = fetch(
-	new URL("./fonts/NotoSansArabic-Regular.ttf", import.meta.url),
-).then((response) => {
-	if (!response.ok) {
-		throw new Error("Failed to load Arabic fallback font");
-	}
-	return response.arrayBuffer();
-});
+const arabicFontPath = path.join(
+	process.cwd(),
+	"app/posts/[postId]/fonts/NotoSansArabic-Regular.ttf",
+);
+
+const arabicFontDataPromise = readFile(arabicFontPath);
 
 const getOgFonts = async () => {
-	const arabicFontData = await arabicFontDataPromise;
+	const arabicFontBuffer = await arabicFontDataPromise;
+	const arabicFontData = arabicFontBuffer.buffer.slice(
+		arabicFontBuffer.byteOffset,
+		arabicFontBuffer.byteOffset + arabicFontBuffer.byteLength,
+	) as ArrayBuffer;
 	return [
 		{
 			name: "Noto Sans Arabic",
