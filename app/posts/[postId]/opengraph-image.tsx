@@ -16,6 +16,27 @@ type OpenGraphImageProps = {
 
 const CARD_TEXT_MAX_LENGTH = 180;
 
+const arabicFontDataPromise = fetch(
+	new URL("./fonts/NotoSansArabic-Regular.ttf", import.meta.url),
+).then((response) => {
+	if (!response.ok) {
+		throw new Error("Failed to load Arabic fallback font");
+	}
+	return response.arrayBuffer();
+});
+
+const getOgFonts = async () => {
+	const arabicFontData = await arabicFontDataPromise;
+	return [
+		{
+			name: "Noto Sans Arabic",
+			data: arabicFontData,
+			style: "normal" as const,
+			weight: 400 as const,
+		},
+	];
+};
+
 export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const { postId } = await params;
 	const post = await fetchPostForOg(postId);
@@ -46,6 +67,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 			</div>,
 			{
 				...size,
+				fonts: await getOgFonts(),
 			},
 		);
 	}
@@ -182,6 +204,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 		</div>,
 		{
 			...size,
+			fonts: await getOgFonts(),
 		},
 	);
 }
