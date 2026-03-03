@@ -39,12 +39,44 @@ const getOgFonts = async () => {
 			style: "normal" as const,
 			weight: 400 as const,
 		},
+		{
+			name: "Noto Sans Arabic",
+			data: arabicFontData,
+			style: "normal" as const,
+			weight: 500 as const,
+		},
+		{
+			name: "Noto Sans Arabic",
+			data: arabicFontData,
+			style: "normal" as const,
+			weight: 700 as const,
+		},
 	];
+};
+
+const containsArabic = (value: string | null | undefined): boolean => {
+	if (!value) return false;
+	return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(
+		value,
+	);
+};
+
+const resolveOgFonts = async (texts: Array<string | null | undefined>) => {
+	if (!texts.some((text) => containsArabic(text))) {
+		return undefined;
+	}
+	try {
+		return await getOgFonts();
+	} catch {
+		return undefined;
+	}
 };
 
 export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const { postId } = await params;
 	const post = await fetchPostForOg(postId);
+
+	const fallbackFonts = await resolveOgFonts([post?.content]);
 
 	if (!post) {
 		return new ImageResponse(
@@ -72,7 +104,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 			</div>,
 			{
 				...size,
-				fonts: await getOgFonts(),
+				...(fallbackFonts ? { fonts: fallbackFonts } : {}),
 			},
 		);
 	}
@@ -88,6 +120,13 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const postText = postTextSource
 		? truncateText(postTextSource, CARD_TEXT_MAX_LENGTH)
 		: null;
+	const ogFonts = await resolveOgFonts([
+		post.author.name,
+		payload.handle,
+		postContent,
+		quoteContent,
+		postText,
+	]);
 
 	return new ImageResponse(
 		<div
@@ -209,7 +248,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 		</div>,
 		{
 			...size,
-			fonts: await getOgFonts(),
+			...(ogFonts ? { fonts: ogFonts } : {}),
 		},
 	);
 }
