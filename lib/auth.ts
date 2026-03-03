@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { twoFactor } from "better-auth/plugins";
 import { and, eq, ne } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import { db } from "@/lib/db";
@@ -91,6 +92,11 @@ export const auth = betterAuth({
 	emailAndPassword: {
 		enabled: true,
 	},
+	plugins: [
+		twoFactor({
+			issuer: "Numatter",
+		}),
+	],
 });
 
 const findAvailableHandleByUserId = async (

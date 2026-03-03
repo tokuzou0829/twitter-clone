@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
-import { signInWithEmail } from "@/lib/auth-actions";
+import { signInWithEmail, verifyTotpForSignIn } from "@/lib/auth-actions";
 
 export default function LoginPage() {
 	const router = useRouter();
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
+	const [totpCode, setTotpCode] = useState("");
+	const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 
@@ -24,7 +26,29 @@ export default function LoginPage() {
 		});
 
 		if (!result.success) {
+			if (result.requiresTwoFactor) {
+				setRequiresTwoFactor(true);
+				setError(null);
+				setIsLoading(false);
+				return;
+			}
+
 			setError(result.error ?? "Login failed");
+			setIsLoading(false);
+			return;
+		}
+
+		router.push("/");
+	};
+
+	const handleVerifyTotp = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		setIsLoading(true);
+		setError(null);
+
+		const result = await verifyTotpForSignIn(totpCode.trim());
+		if (!result.success) {
+			setError(result.error ?? "2FA verification failed");
 			setIsLoading(false);
 			return;
 		}
@@ -59,49 +83,87 @@ export default function LoginPage() {
 							ログイン
 						</h1>
 
-						<form onSubmit={handleSubmit} className="mt-8 space-y-4">
-							<div className="space-y-2">
-								<label
-									className="text-sm font-bold text-[var(--text-subtle)]"
-									htmlFor="email"
-								>
-									Email
-								</label>
-								<input
-									id="email"
-									type="email"
-									required
-									value={email}
-									onChange={(event) => setEmail(event.target.value)}
-									className="h-12 w-full rounded-2xl border border-[var(--border-subtle)] px-4 text-base text-[var(--text-main)] outline-none transition focus:border-sky-400"
-								/>
-							</div>
+						{requiresTwoFactor ? (
+							<form onSubmit={handleVerifyTotp} className="mt-8 space-y-4">
+								<p className="rounded-2xl bg-sky-50 px-4 py-3 text-sm text-sky-700">
+									2段階認証コードを入力してください
+								</p>
+								<div className="space-y-2">
+									<label
+										className="text-sm font-bold text-[var(--text-subtle)]"
+										htmlFor="totp"
+									>
+										Authenticator code
+									</label>
+									<input
+										id="totp"
+										inputMode="numeric"
+										autoComplete="one-time-code"
+										pattern="[0-9]*"
+										required
+										value={totpCode}
+										onChange={(event) =>
+											setTotpCode(
+												event.target.value.replace(/\D/g, "").slice(0, 8),
+											)
+										}
+										className="h-12 w-full rounded-2xl border border-[var(--border-subtle)] px-4 text-base text-[var(--text-main)] outline-none transition focus:border-sky-400"
+									/>
+								</div>
 
-							<div className="space-y-2">
-								<label
-									className="text-sm font-bold text-[var(--text-subtle)]"
-									htmlFor="password"
+								<button
+									type="submit"
+									disabled={isLoading}
+									className="h-12 w-full rounded-full bg-[var(--brand-primary)] px-4 text-sm font-bold text-white transition hover:bg-[var(--brand-primary-hover)] disabled:cursor-not-allowed disabled:opacity-70"
 								>
-									Password
-								</label>
-								<input
-									id="password"
-									type="password"
-									required
-									value={password}
-									onChange={(event) => setPassword(event.target.value)}
-									className="h-12 w-full rounded-2xl border border-[var(--border-subtle)] px-4 text-base text-[var(--text-main)] outline-none transition focus:border-sky-400"
-								/>
-							</div>
+									{isLoading ? "認証中..." : "コードを確認"}
+								</button>
+							</form>
+						) : (
+							<form onSubmit={handleSubmit} className="mt-8 space-y-4">
+								<div className="space-y-2">
+									<label
+										className="text-sm font-bold text-[var(--text-subtle)]"
+										htmlFor="email"
+									>
+										Email
+									</label>
+									<input
+										id="email"
+										type="email"
+										required
+										value={email}
+										onChange={(event) => setEmail(event.target.value)}
+										className="h-12 w-full rounded-2xl border border-[var(--border-subtle)] px-4 text-base text-[var(--text-main)] outline-none transition focus:border-sky-400"
+									/>
+								</div>
 
-							<button
-								type="submit"
-								disabled={isLoading}
-								className="h-12 w-full rounded-full bg-[var(--brand-primary)] px-4 text-sm font-bold text-white transition hover:bg-[var(--brand-primary-hover)] disabled:cursor-not-allowed disabled:opacity-70"
-							>
-								{isLoading ? "ログイン中..." : "ログイン"}
-							</button>
-						</form>
+								<div className="space-y-2">
+									<label
+										className="text-sm font-bold text-[var(--text-subtle)]"
+										htmlFor="password"
+									>
+										Password
+									</label>
+									<input
+										id="password"
+										type="password"
+										required
+										value={password}
+										onChange={(event) => setPassword(event.target.value)}
+										className="h-12 w-full rounded-2xl border border-[var(--border-subtle)] px-4 text-base text-[var(--text-main)] outline-none transition focus:border-sky-400"
+									/>
+								</div>
+
+								<button
+									type="submit"
+									disabled={isLoading}
+									className="h-12 w-full rounded-full bg-[var(--brand-primary)] px-4 text-sm font-bold text-white transition hover:bg-[var(--brand-primary-hover)] disabled:cursor-not-allowed disabled:opacity-70"
+								>
+									{isLoading ? "ログイン中..." : "ログイン"}
+								</button>
+							</form>
+						)}
 
 						{error ? (
 							<p className="mt-4 text-sm text-rose-600">{error}</p>

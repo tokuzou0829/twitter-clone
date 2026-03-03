@@ -31,6 +31,7 @@ export const user = pgTable("user", {
 	handle: varchar("handle", { length: 15 }).unique(),
 	isDeveloper: boolean("is_developer").default(false).notNull(),
 	isBanned: boolean("is_banned").default(false).notNull(),
+	twoFactorEnabled: boolean("two_factor_enabled").default(false).notNull(),
 	email: text("email").notNull().unique(),
 	emailVerified: boolean("email_verified").default(false).notNull(),
 	image: text("image"),
@@ -124,6 +125,24 @@ export const verification = pgTable(
 			.notNull(),
 	},
 	(table) => [index("verification_identifier_idx").on(table.identifier)],
+);
+
+export const twoFactor = pgTable(
+	"two_factor",
+	{
+		id: text("id").primaryKey(),
+		secret: text("secret").notNull(),
+		backupCodes: text("backup_codes").notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+	},
+	(table) => [index("two_factor_user_id_idx").on(table.userId)],
 );
 
 export const pushSubscription = pgTable(
