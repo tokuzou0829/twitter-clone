@@ -1,5 +1,4 @@
 /* biome-ignore-all lint/performance/noImgElement: next/og image rendering requires img tags. */
-
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
