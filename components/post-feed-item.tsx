@@ -69,6 +69,8 @@ const NODE_DOT_SIZE = 8;
 const MIN_SINGLE_IMAGE_ASPECT_RATIO = 0.75;
 const MAX_SINGLE_IMAGE_ASPECT_RATIO = 1.91;
 const DEFAULT_SINGLE_IMAGE_ASPECT_RATIO = 1;
+const JAPANESE_CHAR_PATTERN =
+	/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]/u;
 
 export function PostFeedItem({
 	post,
@@ -251,11 +253,13 @@ export function PostFeedItem({
 	const normalizedSourceLanguage = getPrimaryLanguageCode(post.sourceLanguage);
 	const shouldShowTranslateButton =
 		normalizedOriginalContent.length > 0 &&
-		Boolean(
-			normalizedSourceLanguage &&
-				viewerLanguage &&
-				normalizedSourceLanguage !== viewerLanguage,
-		);
+		(normalizedSourceLanguage
+			? Boolean(
+					normalizedSourceLanguage &&
+						viewerLanguage &&
+						normalizedSourceLanguage !== viewerLanguage,
+				)
+			: !JAPANESE_CHAR_PATTERN.test(normalizedOriginalContent));
 	const displayContent =
 		translationMode === "translated" && translatedContent
 			? translatedContent
