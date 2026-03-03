@@ -20,7 +20,11 @@ import {
 	useState,
 } from "react";
 
-import type { PostSummary, UserSummary } from "@/lib/social-api";
+import {
+	type PostSummary,
+	translatePostText,
+	type UserSummary,
+} from "@/lib/social-api";
 import { createDisplayHandle } from "@/lib/user-handle";
 import { LinkPreviewCard } from "./link-preview-card";
 import { renderPostContent } from "./post-content-text";
@@ -65,7 +69,6 @@ const NODE_DOT_SIZE = 8;
 const MIN_SINGLE_IMAGE_ASPECT_RATIO = 0.75;
 const MAX_SINGLE_IMAGE_ASPECT_RATIO = 1.91;
 const DEFAULT_SINGLE_IMAGE_ASPECT_RATIO = 1;
-const TRANSLATE_BASE_URL = "https://translate.evex.land/";
 const JAPANESE_CHAR_PATTERN =
 	/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]/u;
 const ENGLISH_CHAR_PATTERN =
@@ -97,6 +100,11 @@ export function PostFeedItem({
 	const [singleImageAspectRatios, setSingleImageAspectRatios] = useState<
 		Record<string, number>
 	>({});
+	const [translatedContent, setTranslatedContent] = useState<string | null>(
+		null,
+	);
+	const [isTranslating, setIsTranslating] = useState(false);
+	const [translateError, setTranslateError] = useState<string | null>(null);
 	const postPath = `/posts/${post.id}`;
 	const displayDate = createdAt ?? post.createdAt;
 	const threadLevel = thread?.level ?? 0;
@@ -230,13 +238,32 @@ export function PostFeedItem({
 		);
 	};
 
-	const translationTargetContent = (post.content ?? "").trim();
+	const originalContent = (post.content ?? "").trim();
 	const shouldShowTranslateButton =
-		translationTargetContent.length > 0 &&
-		!JAPANESE_CHAR_PATTERN.test(translationTargetContent);
-	const translateUrl = shouldShowTranslateButton
-		? buildTranslateUrl(translationTargetContent)
-		: null;
+		originalContent.length > 0 && !JAPANESE_CHAR_PATTERN.test(originalContent);
+	const displayContent = translatedContent ?? post.content;
+
+	const handleTranslate = async () => {
+		if (!shouldShowTranslateButton || isTranslating || !originalContent) {
+			return;
+		}
+
+		setIsTranslating(true);
+		setTranslateError(null);
+
+		try {
+			const result = await translatePostText({
+				content: originalContent,
+				target: "ja",
+				...(ENGLISH_CHAR_PATTERN.test(originalContent) ? { from: "en" } : {}),
+			});
+			setTranslatedContent(result.translated);
+		} catch {
+			setTranslateError("翻訳に失敗しました");
+		} finally {
+			setIsTranslating(false);
+		}
+	};
 
 	return (
 		<article
@@ -409,10 +436,30 @@ export function PostFeedItem({
 						</p>
 					) : null}
 
-					{post.content ? (
+					{shouldShowTranslateButton ? (
+						<button
+							type="button"
+							onClick={(event) => {
+								event.stopPropagation();
+								void handleTranslate();
+							}}
+							disabled={isTranslating}
+							className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+						>
+							<Languages className="h-3.5 w-3.5" />
+							<span>{isTranslating ? "翻訳中..." : "翻訳する"}</span>
+						</button>
+					) : null}
+
+					{displayContent ? (
 						<p className="mt-2 whitespace-pre-wrap text-[15px] leading-6 text-[var(--text-main)] break-all">
-							{renderPostContent(post.content, post.mentions)}
+							{translatedContent
+								? translatedContent
+								: renderPostContent(displayContent, post.mentions)}
 						</p>
+					) : null}
+					{translateError ? (
+						<p className="mt-1 text-xs text-rose-500">{translateError}</p>
 					) : null}
 
 					{primaryLink ? <LinkPreviewCard link={primaryLink} /> : null}
@@ -611,20 +658,6 @@ export function PostFeedItem({
 							}
 							icon={<Heart className="h-[18px] w-[18px]" />}
 						/>
-						{translateUrl ? (
-							<a
-								href={translateUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								onClick={(event) => event.stopPropagation()}
-								className="group inline-flex items-center gap-1 rounded-full px-2 py-1 text-[13px] text-[var(--text-subtle)] transition hover:text-sky-600"
-								aria-label="翻訳"
-								title="翻訳"
-							>
-								<Languages className="h-4 w-4" />
-								<span className="hidden sm:inline">翻訳</span>
-							</a>
-						) : null}
 						<PostShareButton postId={post.id} updatedAt={post.updatedAt} />
 					</div>
 				</div>
@@ -791,17 +824,4 @@ function clampSingleImageAspectRatio(ratio: number) {
 		MAX_SINGLE_IMAGE_ASPECT_RATIO,
 		Math.max(MIN_SINGLE_IMAGE_ASPECT_RATIO, ratio),
 	);
-}
-
-function buildTranslateUrl(content: string) {
-	const query = new URLSearchParams({
-		content,
-		target: "ja",
-	});
-
-	if (ENGLISH_CHAR_PATTERN.test(content)) {
-		query.set("from", "en");
-	}
-
-	return `${TRANSLATE_BASE_URL}?${query.toString()}`;
 }

@@ -219,6 +219,12 @@ type PostInteractionSummary = {
 	reposts: number;
 };
 
+export type TranslatePostResponse = {
+	translated: string;
+	from: string | null;
+	target: string;
+};
+
 const JSON_HEADERS = {
 	"Content-Type": "application/json",
 };
@@ -389,6 +395,37 @@ export const fetchMentionSuggestions = async (
 	}
 
 	return body.users ?? [];
+};
+
+export const translatePostText = async (params: {
+	content: string;
+	target?: string;
+	from?: string;
+}): Promise<TranslatePostResponse> => {
+	const response = await fetch("/api/translate", {
+		method: "POST",
+		credentials: "include",
+		headers: JSON_HEADERS,
+		body: JSON.stringify({
+			content: params.content,
+			target: params.target ?? "ja",
+			...(params.from ? { from: params.from } : {}),
+		}),
+	});
+
+	const body = (await response.json()) as TranslatePostResponse & {
+		error?: string;
+	};
+
+	if (!response.ok) {
+		throw new Error(body.error ?? "Failed to translate post");
+	}
+
+	return {
+		translated: body.translated,
+		from: body.from ?? null,
+		target: body.target,
+	};
 };
 
 export const createPost = async (formData: FormData): Promise<PostSummary> => {

@@ -6,6 +6,7 @@ import linkPreviewsRoute from "@/server/routes/link-previews";
 import notificationsRoute from "@/server/routes/notifications";
 import postsRoute from "@/server/routes/posts";
 import searchRoute from "@/server/routes/search";
+import translateRoute from "@/server/routes/translate";
 import usersRoute from "@/server/routes/users";
 
 const app = createHonoApp()
@@ -17,6 +18,7 @@ const app = createHonoApp()
 	.route("/notifications", notificationsRoute)
 	.route("/posts", postsRoute)
 	.route("/search", searchRoute)
+	.route("/translate", translateRoute)
 	.route("/users", usersRoute);
 
 export { app };
