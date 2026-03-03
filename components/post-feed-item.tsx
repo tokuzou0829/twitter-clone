@@ -618,11 +618,11 @@ export function PostFeedItem({
 								rel="noopener noreferrer"
 								onClick={(event) => event.stopPropagation()}
 								className="group inline-flex items-center gap-1 rounded-full px-2 py-1 text-[13px] text-[var(--text-subtle)] transition hover:text-sky-600"
-								aria-label="Translate post"
-								title="Translate"
+								aria-label="翻訳"
+								title="翻訳"
 							>
 								<Languages className="h-4 w-4" />
-								<span className="hidden sm:inline">Translate</span>
+								<span className="hidden sm:inline">翻訳</span>
 							</a>
 						) : null}
 						<PostShareButton postId={post.id} updatedAt={post.updatedAt} />
