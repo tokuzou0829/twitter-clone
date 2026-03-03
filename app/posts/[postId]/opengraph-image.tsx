@@ -1,6 +1,4 @@
 /* biome-ignore-all lint/performance/noImgElement: next/og image rendering requires img tags. */
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { ImageResponse } from "next/og";
 import type { ReactElement } from "react";
 
@@ -20,48 +18,6 @@ type OpenGraphImageProps = {
 
 const CARD_TEXT_MAX_LENGTH = 180;
 
-const arabicFontPath = path.join(
-	process.cwd(),
-	"app/posts/[postId]/fonts/NotoSansArabic-Regular.ttf",
-);
-
-const arabicFontDataPromise = readFile(arabicFontPath);
-
-const getOgFonts = async () => {
-	const arabicFontBuffer = await arabicFontDataPromise;
-	const arabicFontData = arabicFontBuffer.buffer.slice(
-		arabicFontBuffer.byteOffset,
-		arabicFontBuffer.byteOffset + arabicFontBuffer.byteLength,
-	) as ArrayBuffer;
-	return [
-		{
-			name: "Noto Sans Arabic",
-			data: arabicFontData,
-			style: "normal" as const,
-			weight: 400 as const,
-		},
-		{
-			name: "Noto Sans Arabic",
-			data: arabicFontData,
-			style: "normal" as const,
-			weight: 500 as const,
-		},
-		{
-			name: "Noto Sans Arabic",
-			data: arabicFontData,
-			style: "normal" as const,
-			weight: 700 as const,
-		},
-	];
-};
-
-const containsArabic = (value: string | null | undefined): boolean => {
-	if (!value) return false;
-	return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u.test(
-		value,
-	);
-};
-
 const containsRtl = (value: string | null | undefined): boolean => {
 	if (!value) return false;
 	return /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(
@@ -69,26 +25,10 @@ const containsRtl = (value: string | null | undefined): boolean => {
 	);
 };
 
-const resolveOgFonts = async (texts: Array<string | null | undefined>) => {
-	if (!texts.some((text) => containsArabic(text))) {
-		return undefined;
-	}
-	try {
-		return await getOgFonts();
-	} catch {
-		return undefined;
-	}
-};
-
-const createImageResponseSafe = async (
-	node: ReactElement,
-	texts: Array<string | null | undefined>,
-) => {
-	const fonts = await resolveOgFonts(texts);
+const createImageResponseSafe = async (node: ReactElement) => {
 	try {
 		return new ImageResponse(node, {
 			...size,
-			...(fonts ? { fonts } : {}),
 		});
 	} catch {
 		return new ImageResponse(node, {
@@ -204,7 +144,6 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 					}}
 				/>
 			</div>,
-			[],
 		);
 	}
 
@@ -227,7 +166,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 		postText,
 	];
 	if (textsForDetection.some((text) => containsRtl(text))) {
-		return createImageResponseSafe(renderRtlFallbackCard(), []);
+		return createImageResponseSafe(renderRtlFallbackCard());
 	}
 
 	return createImageResponseSafe(
@@ -348,7 +287,6 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 				) : null}
 			</div>
 		</div>,
-		textsForDetection,
 	);
 }
 
