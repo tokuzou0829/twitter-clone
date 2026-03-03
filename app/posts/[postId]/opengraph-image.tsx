@@ -1,7 +1,6 @@
 /* biome-ignore-all lint/performance/noImgElement: next/og image rendering requires img tags. */
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { ImageResponse } from "next/og";
+import type { ReactElement } from "react";
 
 import { buildPostOgPayload, fetchPostForOg, toAbsoluteUrl } from "./post-og";
 
@@ -19,26 +18,106 @@ type OpenGraphImageProps = {
 
 const CARD_TEXT_MAX_LENGTH = 180;
 
-const arabicFontPath = fileURLToPath(
-	new URL("./fonts/NotoSansArabic-Regular.ttf", import.meta.url),
-);
+const containsRtl = (value: string | null | undefined): boolean => {
+	if (!value) return false;
+	return /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(
+		value,
+	);
+};
 
-const arabicFontDataPromise = readFile(arabicFontPath);
+const createImageResponseSafe = async (node: ReactElement) => {
+	try {
+		return new ImageResponse(node, {
+			...size,
+		});
+	} catch {
+		return new ImageResponse(node, {
+			...size,
+		});
+	}
+};
 
-const getOgFonts = async () => {
-	const arabicFontBuffer = await arabicFontDataPromise;
-	const arabicFontData = arabicFontBuffer.buffer.slice(
-		arabicFontBuffer.byteOffset,
-		arabicFontBuffer.byteOffset + arabicFontBuffer.byteLength,
-	) as ArrayBuffer;
-	return [
-		{
-			name: "Noto Sans Arabic",
-			data: arabicFontData,
-			style: "normal" as const,
-			weight: 400 as const,
-		},
-	];
+const POOP_QUOTES = [
+	"うんこは急がず、流れに乗る。",
+	"つらい日は、いったん出して寝る。",
+	"完璧より快便。",
+	"詰まったら、水を飲んで深呼吸。",
+	"人生の重みは、だいたい腸から来る。",
+	"今日の運勢: うんを味方につけろ。",
+	"出る日は正義、出ない日は戦略。",
+	"焦るな、腸は気分屋。",
+	"いいアイデアはトイレで生まれる。",
+	"流した後こそ、心は軽い。",
+];
+
+const pickPoopQuote = () =>
+	POOP_QUOTES[Math.floor(Math.random() * POOP_QUOTES.length)] ?? POOP_QUOTES[0];
+
+const renderRtlFallbackCard = () => {
+	const quote = pickPoopQuote();
+	return (
+		<div
+			style={{
+				display: "flex",
+				width: "100%",
+				height: "100%",
+				backgroundColor: "#ecf3ff",
+				padding: 24,
+			}}
+		>
+			<div
+				style={{
+					display: "flex",
+					width: "100%",
+					height: "100%",
+					borderRadius: 26,
+					backgroundColor: "#ffffff",
+					border: "2px solid #d8e5ff",
+					alignItems: "center",
+					justifyContent: "center",
+					color: "#1a2740",
+				}}
+			>
+				<div
+					style={{
+						display: "flex",
+						flexDirection: "column",
+						alignItems: "center",
+						maxWidth: 920,
+						padding: "0 24px",
+					}}
+				>
+					<div style={{ display: "flex", fontSize: 170, lineHeight: 1 }}>
+						💩
+					</div>
+					<div
+						style={{
+							display: "flex",
+							marginTop: 8,
+							fontSize: 30,
+							fontWeight: 700,
+							color: "#13223b",
+						}}
+					>
+						この投稿はプレビューできません。
+					</div>
+					<div
+						style={{
+							display: "flex",
+							marginTop: 12,
+							fontSize: 26,
+							lineHeight: 1.4,
+							fontWeight: 500,
+							color: "#334155",
+							textAlign: "center",
+						}}
+					>
+						{quote}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
 };
 
 export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
@@ -46,7 +125,7 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const post = await fetchPostForOg(postId);
 
 	if (!post) {
-		return new ImageResponse(
+		return createImageResponseSafe(
 			<div
 				style={{
 					display: "flex",
@@ -69,10 +148,6 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 					}}
 				/>
 			</div>,
-			{
-				...size,
-				fonts: await getOgFonts(),
-			},
 		);
 	}
 
@@ -87,8 +162,18 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 	const postText = postTextSource
 		? truncateText(postTextSource, CARD_TEXT_MAX_LENGTH)
 		: null;
+	const textsForDetection = [
+		post.author.name,
+		payload.handle,
+		postContent,
+		quoteContent,
+		postText,
+	];
+	if (textsForDetection.some((text) => containsRtl(text))) {
+		return createImageResponseSafe(renderRtlFallbackCard());
+	}
 
-	return new ImageResponse(
+	return createImageResponseSafe(
 		<div
 			style={{
 				display: "flex",
@@ -206,10 +291,6 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 				) : null}
 			</div>
 		</div>,
-		{
-			...size,
-			fonts: await getOgFonts(),
-		},
 	);
 }
 
