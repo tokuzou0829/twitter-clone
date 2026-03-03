@@ -1,0 +1,31 @@
+{
+	"name": "numatter-client",
+	"version": "0.1.0",
+	"description": "TypeScript client library for Numatter Developer API",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"clean": "rm -rf dist"
+	},
+	"keywords": [
+		"numatter",
+		"twitter-clone",
+		"typescript",
+		"api-client"
+	],
+	"license": "MIT",
+	"devDependencies": {
+		"typescript": "^5.9.3"
+	}
+}
