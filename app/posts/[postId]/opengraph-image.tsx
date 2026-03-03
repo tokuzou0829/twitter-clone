@@ -1,4 +1,6 @@
 /* biome-ignore-all lint/performance/noImgElement: next/og image rendering requires img tags. */
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { ImageResponse } from "next/og";
 import type { ReactElement } from "react";
 
@@ -18,6 +20,37 @@ type OpenGraphImageProps = {
 
 const CARD_TEXT_MAX_LENGTH = 180;
 
+const mplusFontPath = path.join(
+	process.cwd(),
+	"app/posts/[postId]/fonts/MPLUS1p-Regular.ttf",
+);
+
+const mplusFontDataPromise = readFile(mplusFontPath).then(
+	(fontBuffer) =>
+		fontBuffer.buffer.slice(
+			fontBuffer.byteOffset,
+			fontBuffer.byteOffset + fontBuffer.byteLength,
+		) as ArrayBuffer,
+);
+
+const loadFallbackFonts = async () => {
+	const mplusFontData = await mplusFontDataPromise;
+	return [
+		{
+			name: "M PLUS 1p",
+			data: mplusFontData,
+			style: "normal" as const,
+			weight: 400 as const,
+		},
+		{
+			name: "M PLUS 1p",
+			data: mplusFontData,
+			style: "normal" as const,
+			weight: 700 as const,
+		},
+	];
+};
+
 const containsRtl = (value: string | null | undefined): boolean => {
 	if (!value) return false;
 	return /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(
@@ -25,10 +58,19 @@ const containsRtl = (value: string | null | undefined): boolean => {
 	);
 };
 
-const createImageResponseSafe = async (node: ReactElement) => {
+const createImageResponseSafe = async (
+	node: ReactElement,
+	fonts?: {
+		name: string;
+		data: ArrayBuffer;
+		style: "normal";
+		weight: 400 | 700;
+	}[],
+) => {
 	try {
 		return new ImageResponse(node, {
 			...size,
+			...(fonts ? { fonts } : {}),
 		});
 	} catch {
 		return new ImageResponse(node, {
@@ -170,7 +212,8 @@ export default async function OpenGraphImage({ params }: OpenGraphImageProps) {
 		postText,
 	];
 	if (textsForDetection.some((text) => containsRtl(text))) {
-		return createImageResponseSafe(renderRtlFallbackCard());
+		const fallbackFonts = await loadFallbackFonts().catch(() => undefined);
+		return createImageResponseSafe(renderRtlFallbackCard(), fallbackFonts);
 	}
 
 	return createImageResponseSafe(
