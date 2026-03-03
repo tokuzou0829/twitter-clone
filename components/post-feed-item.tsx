@@ -100,9 +100,13 @@ export function PostFeedItem({
 	const [singleImageAspectRatios, setSingleImageAspectRatios] = useState<
 		Record<string, number>
 	>({});
+	const [originalContentState] = useState<string | null>(post.content ?? null);
 	const [translatedContent, setTranslatedContent] = useState<string | null>(
 		null,
 	);
+	const [translationMode, setTranslationMode] = useState<
+		"original" | "translated"
+	>("original");
 	const [isTranslating, setIsTranslating] = useState(false);
 	const [translateError, setTranslateError] = useState<string | null>(null);
 	const postPath = `/posts/${post.id}`;
@@ -238,18 +242,31 @@ export function PostFeedItem({
 		);
 	};
 
-	const originalContent = (post.content ?? "").trim();
+	const normalizedOriginalContent = (originalContentState ?? "").trim();
 	const shouldShowTranslateButton =
-		originalContent.length > 0 && !JAPANESE_CHAR_PATTERN.test(originalContent);
-	const displayContent = translatedContent ?? post.content;
+		normalizedOriginalContent.length > 0 &&
+		!JAPANESE_CHAR_PATTERN.test(normalizedOriginalContent);
+	const displayContent =
+		translationMode === "translated" && translatedContent
+			? translatedContent
+			: originalContentState;
 
-	const handleTranslate = async () => {
+	const handleTranslateToggle = async () => {
 		if (
 			!shouldShowTranslateButton ||
 			isTranslating ||
-			translatedContent ||
-			!originalContent
+			!normalizedOriginalContent
 		) {
+			return;
+		}
+
+		if (translationMode === "translated") {
+			setTranslationMode("original");
+			return;
+		}
+
+		if (translatedContent) {
+			setTranslationMode("translated");
 			return;
 		}
 
@@ -258,11 +275,14 @@ export function PostFeedItem({
 
 		try {
 			const result = await translatePostText({
-				content: originalContent,
+				postId: post.id,
 				target: "ja",
-				...(ENGLISH_CHAR_PATTERN.test(originalContent) ? { from: "en" } : {}),
+				...(ENGLISH_CHAR_PATTERN.test(normalizedOriginalContent)
+					? { from: "en" }
+					: {}),
 			});
 			setTranslatedContent(result.translated);
+			setTranslationMode("translated");
 		} catch {
 			setTranslateError("翻訳に失敗しました");
 		} finally {
@@ -446,25 +466,27 @@ export function PostFeedItem({
 							type="button"
 							onClick={(event) => {
 								event.stopPropagation();
-								void handleTranslate();
+								void handleTranslateToggle();
 							}}
-							disabled={isTranslating || Boolean(translatedContent)}
+							disabled={isTranslating}
 							className="mt-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
 						>
 							<Languages className="h-3 w-3" />
 							<span>
-								{translatedContent
-									? "翻訳済み"
-									: isTranslating
-										? "翻訳中..."
-										: "翻訳する"}
+								{isTranslating
+									? "翻訳中..."
+									: translationMode === "translated"
+										? "原文に戻す"
+										: translatedContent
+											? "翻訳を見る"
+											: "翻訳する"}
 							</span>
 						</button>
 					) : null}
 
 					{displayContent ? (
 						<p className="mt-2 whitespace-pre-wrap text-[15px] leading-6 text-[var(--text-main)] break-all">
-							{translatedContent
+							{translationMode === "translated" && translatedContent
 								? translatedContent
 								: renderPostContent(displayContent, post.mentions)}
 						</p>

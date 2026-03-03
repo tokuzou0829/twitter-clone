@@ -398,7 +398,7 @@ export const fetchMentionSuggestions = async (
 };
 
 export const translatePostText = async (params: {
-	content: string;
+	postId: string;
 	target?: string;
 	from?: string;
 }): Promise<TranslatePostResponse> => {
@@ -407,7 +407,7 @@ export const translatePostText = async (params: {
 		credentials: "include",
 		headers: JSON_HEADERS,
 		body: JSON.stringify({
-			content: params.content,
+			postId: params.postId,
 			target: params.target ?? "ja",
 			...(params.from ? { from: params.from } : {}),
 		}),

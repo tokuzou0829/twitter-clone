@@ -1,10 +1,15 @@
 import { zValidator } from "@hono/zod-validator";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+import * as schema from "@/db/schema";
 import { createHonoApp } from "../create-app";
 
+const ENGLISH_CHAR_PATTERN =
+	/^[\p{Script=Latin}\p{Number}\p{Punctuation}\p{Separator}\p{Symbol}]+$/u;
+
 const translateRequestSchema = z.object({
-	content: z.string().trim().min(1).max(4000),
+	postId: z.string().trim().min(1).max(128),
 	target: z.string().trim().min(2).max(8).default("ja"),
 	from: z.string().trim().min(2).max(8).optional(),
 });
@@ -13,7 +18,21 @@ const app = createHonoApp().post(
 	"/",
 	zValidator("json", translateRequestSchema),
 	async (c) => {
-		const { content, target, from } = c.req.valid("json");
+		const { postId, target, from } = c.req.valid("json");
+		const db = c.get("db");
+
+		const post = await db.query.posts.findFirst({
+			where: eq(schema.posts.id, postId),
+			columns: {
+				id: true,
+				content: true,
+			},
+		});
+
+		const content = post?.content?.trim();
+		if (!post || !content) {
+			return c.json({ error: "Post not found or empty" }, 404);
+		}
 
 		const query = new URLSearchParams({
 			content,
@@ -22,6 +41,8 @@ const app = createHonoApp().post(
 
 		if (from) {
 			query.set("from", from);
+		} else if (ENGLISH_CHAR_PATTERN.test(content)) {
+			query.set("from", "en");
 		}
 
 		const response = await fetch(
