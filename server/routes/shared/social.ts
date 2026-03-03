@@ -53,6 +53,7 @@ type PostSummary = {
 	updatedAt: string;
 	replyToPostId: string | null;
 	quotePostId: string | null;
+	sourceLanguage?: string | null;
 	author: UserSummary;
 	images: PostImageSummary[];
 	links: LinkSummary[];
@@ -88,6 +89,7 @@ type PostRow = {
 	updatedAt: Date;
 	replyToPostId: string | null;
 	quotePostId: string | null;
+	sourceLanguage: string | null;
 	authorId: string;
 	authorName: string;
 	authorHandle: string | null;
@@ -348,6 +350,7 @@ export const loadPostSummaryMap = async (params: {
 			updatedAt: schema.posts.updatedAt,
 			replyToPostId: schema.posts.replyToPostId,
 			quotePostId: schema.posts.quotePostId,
+			sourceLanguage: schema.posts.sourceLanguage,
 			authorId: schema.user.id,
 			authorName: schema.user.name,
 			authorHandle: schema.user.handle,
@@ -390,6 +393,7 @@ export const loadPostSummaryMap = async (params: {
 			updatedAt: postRow.updatedAt.toISOString(),
 			replyToPostId: postRow.replyToPostId,
 			quotePostId: postRow.quotePostId,
+			sourceLanguage: postRow.sourceLanguage,
 			author,
 			images: imagesByPostId.get(postRow.postId) ?? [],
 			links: linksByPostId.get(postRow.postId) ?? [],

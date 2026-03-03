@@ -548,6 +548,7 @@ const createPostWithImages = async (params: {
 			content,
 			replyToPostId: replyToPostId ?? null,
 			quotePostId: quotePostId ?? null,
+			sourceLanguage: null,
 			createdAt: new Date(),
 			updatedAt: new Date(),
 		});
@@ -619,6 +620,17 @@ const createPostWithImages = async (params: {
 				createdAt: new Date(),
 			});
 		}
+
+		const detectedSourceLanguage = await detectPostSourceLanguage(content);
+		if (detectedSourceLanguage) {
+			await db
+				.update(schema.posts)
+				.set({
+					sourceLanguage: detectedSourceLanguage,
+					updatedAt: new Date(),
+				})
+				.where(eq(schema.posts.id, postId));
+		}
 	} catch (error) {
 		await Promise.all(
 			uploadedFileIds.map((fileId) =>
@@ -641,6 +653,54 @@ const createPostWithImages = async (params: {
 	}
 
 	return post;
+};
+
+const detectPostSourceLanguage = async (content: string | null) => {
+	const normalizedContent = content?.trim();
+	if (!normalizedContent) {
+		return null;
+	}
+
+	const query = new URLSearchParams({
+		content: normalizedContent,
+		target: "en",
+	});
+
+	try {
+		const response = await fetch(
+			`https://translate.evex.land/?${query.toString()}`,
+			{
+				headers: {
+					Accept: "application/json, text/plain;q=0.9, */*;q=0.8",
+				},
+			},
+		);
+
+		if (!response.ok) {
+			return null;
+		}
+
+		const raw = await response.text();
+		const parsed: unknown = JSON.parse(raw);
+		const first = Array.isArray(parsed) ? parsed[0] : parsed;
+		if (!first || typeof first !== "object") {
+			return null;
+		}
+
+		const detectedFrom = (first as { from?: unknown }).from;
+		if (typeof detectedFrom !== "string") {
+			return null;
+		}
+
+		const [primary] = detectedFrom.trim().toLowerCase().split("-");
+		if (!primary) {
+			return null;
+		}
+
+		return primary.slice(0, 8);
+	} catch {
+		return null;
+	}
 };
 
 const loadConversationPathIds = async (db: Database, postId: string) => {

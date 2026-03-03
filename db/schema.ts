@@ -167,6 +167,7 @@ export const posts = pgTable(
 		quotePostId: text("quote_post_id").references((): AnyPgColumn => posts.id, {
 			onDelete: "set null",
 		}),
+		sourceLanguage: varchar("source_language", { length: 8 }),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 		updatedAt: timestamp("updated_at")
 			.defaultNow()

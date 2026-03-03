@@ -69,10 +69,6 @@ const NODE_DOT_SIZE = 8;
 const MIN_SINGLE_IMAGE_ASPECT_RATIO = 0.75;
 const MAX_SINGLE_IMAGE_ASPECT_RATIO = 1.91;
 const DEFAULT_SINGLE_IMAGE_ASPECT_RATIO = 1;
-const JAPANESE_CHAR_PATTERN =
-	/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]/u;
-const ENGLISH_CHAR_PATTERN =
-	/^[\p{Script=Latin}\p{Number}\p{Punctuation}\p{Separator}\p{Symbol}]+$/u;
 
 export function PostFeedItem({
 	post,
@@ -109,6 +105,7 @@ export function PostFeedItem({
 	>("original");
 	const [isTranslating, setIsTranslating] = useState(false);
 	const [translateError, setTranslateError] = useState<string | null>(null);
+	const [viewerLanguage, setViewerLanguage] = useState<string | null>(null);
 	const postPath = `/posts/${post.id}`;
 	const displayDate = createdAt ?? post.createdAt;
 	const threadLevel = thread?.level ?? 0;
@@ -173,6 +170,14 @@ export function PostFeedItem({
 			window.removeEventListener("keydown", handleEscape);
 		};
 	}, [expandedImage]);
+
+	useEffect(() => {
+		if (typeof navigator === "undefined") {
+			return;
+		}
+
+		setViewerLanguage(getPrimaryLanguageCode(navigator.language));
+	}, []);
 
 	const handleCardClick = (event: ReactMouseEvent<HTMLElement>) => {
 		const target = event.target;
@@ -243,9 +248,14 @@ export function PostFeedItem({
 	};
 
 	const normalizedOriginalContent = (originalContentState ?? "").trim();
+	const normalizedSourceLanguage = getPrimaryLanguageCode(post.sourceLanguage);
 	const shouldShowTranslateButton =
 		normalizedOriginalContent.length > 0 &&
-		!JAPANESE_CHAR_PATTERN.test(normalizedOriginalContent);
+		Boolean(
+			normalizedSourceLanguage &&
+				viewerLanguage &&
+				normalizedSourceLanguage !== viewerLanguage,
+		);
 	const displayContent =
 		translationMode === "translated" && translatedContent
 			? translatedContent
@@ -276,10 +286,8 @@ export function PostFeedItem({
 		try {
 			const result = await translatePostText({
 				postId: post.id,
-				target: "ja",
-				...(ENGLISH_CHAR_PATTERN.test(normalizedOriginalContent)
-					? { from: "en" }
-					: {}),
+				target: viewerLanguage ?? "en",
+				...(normalizedSourceLanguage ? { from: normalizedSourceLanguage } : {}),
 			});
 			setTranslatedContent(result.translated);
 			setTranslationMode("translated");
@@ -857,4 +865,18 @@ function clampSingleImageAspectRatio(ratio: number) {
 		MAX_SINGLE_IMAGE_ASPECT_RATIO,
 		Math.max(MIN_SINGLE_IMAGE_ASPECT_RATIO, ratio),
 	);
+}
+
+function getPrimaryLanguageCode(value: string | null | undefined) {
+	if (!value) {
+		return null;
+	}
+
+	const normalized = value.trim().toLowerCase();
+	if (!normalized) {
+		return null;
+	}
+
+	const [primary] = normalized.split("-");
+	return primary || null;
 }

@@ -59,6 +59,7 @@ export type PostSummary = {
 	updatedAt: string;
 	replyToPostId: string | null;
 	quotePostId: string | null;
+	sourceLanguage?: string | null;
 	author: UserSummary;
 	images: PostImageSummary[];
 	links: LinkSummary[];
