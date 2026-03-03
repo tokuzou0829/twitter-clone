@@ -244,7 +244,12 @@ export function PostFeedItem({
 	const displayContent = translatedContent ?? post.content;
 
 	const handleTranslate = async () => {
-		if (!shouldShowTranslateButton || isTranslating || !originalContent) {
+		if (
+			!shouldShowTranslateButton ||
+			isTranslating ||
+			translatedContent ||
+			!originalContent
+		) {
 			return;
 		}
 
@@ -443,11 +448,17 @@ export function PostFeedItem({
 								event.stopPropagation();
 								void handleTranslate();
 							}}
-							disabled={isTranslating}
-							className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+							disabled={isTranslating || Boolean(translatedContent)}
+							className="mt-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
 						>
-							<Languages className="h-3.5 w-3.5" />
-							<span>{isTranslating ? "翻訳中..." : "翻訳する"}</span>
+							<Languages className="h-3 w-3" />
+							<span>
+								{translatedContent
+									? "翻訳済み"
+									: isTranslating
+										? "翻訳中..."
+										: "翻訳する"}
+							</span>
 						</button>
 					) : null}
 
