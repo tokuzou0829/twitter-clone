@@ -394,6 +394,35 @@ describe("/routes/developer", () => {
 		expect(mocks.saveBlobFile).toHaveBeenCalledTimes(1);
 	});
 
+	it("Developer APIでもsourceLanguage判定APIが失敗しても投稿は作成される", async () => {
+		const token = await createDeveloperApiToken();
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValue(new Error("translate api down"));
+
+		const formData = new FormData();
+		formData.set("content", "developer route fallback test");
+
+		const response = await app.request("/v1/posts", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${token.plainToken}`,
+			},
+			body: formData,
+		});
+		const body = (await response.json()) as {
+			post: {
+				sourceLanguage?: string | null;
+			};
+		};
+
+		expect(response.status).toBe(201);
+		expect(fetchSpy).toHaveBeenCalled();
+		expect(body.post.sourceLanguage ?? null).toBeNull();
+
+		fetchSpy.mockRestore();
+	});
+
 	it("Bearerトークンで投稿を単体取得できる", async () => {
 		const token = await createDeveloperApiToken();
 		const authorId = "developer_get_post_author";
