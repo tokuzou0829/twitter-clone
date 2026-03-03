@@ -291,7 +291,6 @@ export function PostFeedItem({
 			const result = await translatePostText({
 				postId: post.id,
 				target: viewerLanguage ?? "en",
-				...(normalizedSourceLanguage ? { from: normalizedSourceLanguage } : {}),
 			});
 			setTranslatedContent(result.translated);
 			setTranslationMode("translated");
