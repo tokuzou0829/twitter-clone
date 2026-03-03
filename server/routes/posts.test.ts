@@ -64,6 +64,33 @@ describe("/routes/posts", () => {
 		expect(response.status).toBe(400);
 	});
 
+	it("sourceLanguage判定APIが失敗しても投稿は作成される", async () => {
+		await createUser();
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValue(new Error("translate api down"));
+
+		const formData = new FormData();
+		formData.set("content", "hello world");
+
+		const response = await app.request("/", {
+			method: "POST",
+			body: formData,
+		});
+		const body = (await response.json()) as {
+			post: {
+				id: string;
+				sourceLanguage?: string | null;
+			};
+		};
+
+		expect(response.status).toBe(201);
+		expect(fetchSpy).toHaveBeenCalled();
+		expect(body.post.sourceLanguage ?? null).toBeNull();
+
+		fetchSpy.mockRestore();
+	});
+
 	it("投稿時にリンク情報を保存して返す", async () => {
 		await createUser();
 		const formData = new FormData();
